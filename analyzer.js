@@ -69,15 +69,63 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function processRows(rows) {
         rows.forEach(row => {
+            // レガシー・アダプター: 旧フォーマットを自動検知して変換
+            const normalizedRow = detectAndMapLegacy(row);
+            
             // カラムの存在確認（必要最小限のキー）
-            if (!row["日付"] || !row["レース名"] || !row["馬番"]) return;
+            if (!normalizedRow["レース名"] || !normalizedRow["馬番"]) return;
 
-            const raceId = `${row["日付"]}_${row["レース名"]}_${row["コース詳細"]}`;
-            const uniqueKey = `${raceId}_${row["馬番"]}`;
+            const raceId = getRaceId(normalizedRow);
+            const uniqueKey = `${raceId}_${normalizedRow["馬番"]}`;
             
             // 重複排除（後から読み込んだデータで上書き）
-            allData.set(uniqueKey, row);
+            allData.set(uniqueKey, normalizedRow);
         });
+    }
+
+    function detectAndMapLegacy(row) {
+        // 旧フォーマットの特徴的なヘッダーをチェック
+        const isLegacy = row["実際オッズ"] !== undefined || row["最終詳細クラス"] !== undefined;
+        
+        if (!isLegacy) return row;
+
+        // 21カラム形式にマッピング
+        const mapped = {};
+        mapped["日付"] = row["日付"] || "Legacy";
+        mapped["レース名"] = row["レース名"];
+        mapped["コース詳細"] = row["コース詳細(開催場も含めた)"] || row["コース詳細"];
+        mapped["グレード・頭数"] = row["レースグレード"] || "-";
+        mapped["馬番"] = row["馬番"];
+        mapped["馬名"] = row["馬名"];
+        mapped["購入時人気"] = "-";
+        mapped["購入時オッズ"] = row["実際オッズ"];
+        mapped["評価"] = row["評価"];
+        mapped["購入時期待値"] = row["期待値"];
+        mapped["購入時クラス"] = row["最終詳細クラス"];
+        mapped["最終確定人気"] = "-";
+        mapped["最終確定オッズ"] = row["実際オッズ"];
+        mapped["最終確定期待値"] = row["期待値"];
+        mapped["最終確定クラス"] = row["最終詳細クラス"];
+        mapped["着順"] = row["着順"];
+        mapped["MAO"] = "-";
+        mapped["実行フラグ"] = "-";
+        mapped["単勝払戻"] = row["単勝払戻"];
+        mapped["ワイド払戻"] = row["ワイド払戻"];
+        mapped["三連複払戻"] = row["三連複払戻"];
+
+        return mapped;
+    }
+
+    function getRaceId(row) {
+        const date = row["日付"];
+        const name = row["レース名"];
+        const course = row["コース詳細"];
+        
+        // 日付が "Legacy" または空の場合はレース名+詳細でID生成
+        if (!date || date === "Legacy") {
+            return `${name}_${course}`;
+        }
+        return `${date}_${name}_${course}`;
     }
 
     function addFileBadge(name, count) {
