@@ -14,8 +14,8 @@
 <body class="p-4 md:p-8">
     <div class="max-w-6xl mx-auto">
         <header class="mb-8 md:mb-12 text-center animate-fade">
-            <h1 class="text-3xl md:text-4xl font-bold mb-2 tracking-tight">SS-Analyzer</h1>
-            <p class="text-slate-400 text-sm md:text-base">SS-Engine 期待値統合・解析システム</p>
+            <h1 class="text-3xl md:text-4xl font-bold mb-2 tracking-tight text-white">SS-Analyzer</h1>
+            <p class="text-slate-400 text-sm md:text-base">SS-Engine 期待値統合・解析システム v2.1</p>
         </header>
 
         <main class="space-y-8">
@@ -33,96 +33,56 @@
             <section class="glass-panel animate-fade flex flex-wrap gap-4 items-center justify-between" style="animation-delay: 0.2s;">
                 <div>
                     <h2 class="text-xl font-semibold">② 操作パネル</h2>
-                    <p class="text-sm text-slate-400">データの統合と解析を実行します</p>
+                    <p class="text-sm text-slate-400">データの統合と解析をブラウザで完結させます</p>
                 </div>
                 <div class="flex gap-4">
-                    <button id="btn-integrate" class="btn-primary px-6 py-3 rounded-lg font-semibold" disabled>データを統合してダウンロード</button>
-                    <button id="btn-analyze" class="btn-primary px-6 py-3 rounded-lg font-semibold" disabled>集計・解析を実行</button>
+                    <button id="integrateBtn" class="btn-primary px-6 py-3 rounded-lg font-semibold" disabled>データを統合してダウンロード</button>
+                    <button id="analyzeBtn" class="btn-primary px-6 py-3 rounded-lg font-semibold" disabled>集計・解析を実行</button>
                 </div>
             </section>
 
             <!-- Analysis View -->
-                <div id="analysis-summary" class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-                    <!-- JSで動的に追加: 総レース数、総頭数、全体回収率 -->
-                </div>
-
+            <section id="analysisSection" class="glass-panel animate-fade hidden" style="animation-delay: 0.3s;">
+                <h2 class="text-lg md:text-xl font-semibold mb-6">③ 解析結果・パフォーマンス診断</h2>
+                
                 <div class="mb-10">
-                    <h3 class="text-lg font-medium mb-4 text-blue-400">📈 Equity Curve（累積期待値 vs 実績）</h3>
-                    <div class="chart-container">
+                    <h3 class="text-lg font-medium mb-4 text-blue-400">📈 Equity Curve（期待値収束グラフ）</h3>
+                    <div class="chart-container" style="position: relative; height:400px; width:100%">
                         <canvas id="equityChart"></canvas>
                     </div>
                 </div>
 
-                <div class="overflow-x-auto -mx-4 md:mx-0">
-                    <table class="analysis-table text-sm md:text-base min-w-[600px] md:min-w-full">
-                        <thead>
-                            <tr>
-                                <th>クラス</th>
-                                <th>頭数 (サンプル)</th>
-                                <th>1着率 (勝率)</th>
-                                <th>3着以内率 (複勝率)</th>
-                                <th>単勝回収率</th>
-                                <th>平均EV (確定値)</th>
-                            </tr>
-                        </thead>
-                        <tbody id="analysis-tbody">
-                            <!-- JSで生成 -->
-                        </tbody>
-                    </table>
-                </div>
-
-                <div class="mt-12">
-                    <h3 class="text-lg font-medium mb-4 text-purple-400">🛡️ MAO・監査フィルター解析（実行フラグ別）</h3>
-                    <div class="overflow-x-auto -mx-4 md:mx-0">
-                        <table class="analysis-table text-sm md:text-base min-w-[600px] md:min-w-full">
-                            <thead>
-                                <tr>
-                                    <th>フラグ</th>
-                                    <th>頭数</th>
-                                    <th>1着率</th>
-                                    <th>3着内率</th>
-                                    <th>回収率</th>
-                                    <th>平均EV</th>
-                                </tr>
-                            </thead>
-                            <tbody id="mao-tbody">
-                                <!-- JSで生成 -->
-                            </tbody>
-                        </table>
-                    </div>
+                <!-- Dynamic Area for Tables -->
+                <div id="analysisResultArea" class="space-y-12">
+                    <!-- JSでテーブルを生成・挿入します -->
                 </div>
             </section>
 
             <!-- Gemini Export -->
-            <section id="gemini-export" class="glass-panel animate-fade hidden" style="animation-delay: 0.4s;">
+            <section id="geminiExportSection" class="glass-panel animate-fade hidden" style="animation-delay: 0.4s;">
                 <div class="flex justify-between items-center mb-4">
                     <h2 class="text-xl font-semibold">④ Gemini解析用サマリー</h2>
-                    <button id="btn-copy-markdown" class="btn-primary px-4 py-2 rounded-md text-sm">クリップボードにコピー</button>
+                    <button id="copyBtn" class="btn-primary px-4 py-2 rounded-md text-sm">コピー</button>
                 </div>
-                <p class="text-sm text-slate-400 mb-2">Gemini 3 思考モードにこのまま貼り付けて詳細分析を依頼できます。</p>
-                <textarea id="markdown-output" class="summary-area" readonly></textarea>
+                <p class="text-sm text-slate-400 mb-2">※解析完了時に自動でクリップボードにコピーされます。</p>
+                <textarea id="geminiOutput" class="summary-area w-full" style="height: 300px;" readonly></textarea>
             </section>
         </main>
 
         <footer class="mt-12 text-center text-slate-500 text-sm">
-            <p>&copy; 2026 SS-Analyzer Project | Dark Mode Glassmorphism Interface</p>
+            <p>&copy; 2026 SS-Analyzer Project | Professional Keiba Analytics</p>
         </footer>
     </div>
 
-    <div id="toast">解析が完了しました！</div>
+    <!-- Toast Notification -->
+    <div id="toast" class="fixed bottom-8 right-8 bg-blue-600 text-white px-6 py-3 rounded-lg shadow-xl opacity-0 translate-y-20 transition-all duration-300 z-50 pointer-events-none">
+        解析完了！サマリーをコピーしました。
+    </div>
 
-    <!-- Tailwind CSS (CDN for layout utilities) -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
-            theme: {
-                extend: {
-                    colors: {
-                        primary: '#3b82f6',
-                        secondary: '#8b5cf6',
-                    }
-                }
-            }
+            theme: { extend: { colors: { primary: '#3b82f6', secondary: '#8b5cf6' } } }
         }
     </script>
     <script src="analyzer.js"></script>

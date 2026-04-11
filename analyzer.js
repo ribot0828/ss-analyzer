@@ -1,27 +1,24 @@
 /**
- * SS-Analyzer | 高度統合・解析システム
+ * SS-Analyzer v2.1 | 統合・解析・視覚化システム
  * Core Logic (analyzer.js)
- * v2.0 - Advanced Metrics & Visualization
  */
 
 document.addEventListener('DOMContentLoaded', () => {
     // UI Elements
     const dropzone = document.getElementById('dropzone');
     const fileList = document.getElementById('file-list');
-    const btnIntegrate = document.getElementById('btn-integrate');
-    const btnAnalyze = document.getElementById('btn-analyze');
-    const analysisView = document.getElementById('analysis-view');
-    const analysisTbody = document.getElementById('analysis-tbody');
-    const maoTbody = document.getElementById('mao-tbody');
-    const analysisSummary = document.getElementById('analysis-summary');
-    const geminiExport = document.getElementById('gemini-export');
-    const markdownOutput = document.getElementById('markdown-output');
-    const btnCopyMarkdown = document.getElementById('btn-copy-markdown');
+    const integrateBtn = document.getElementById('integrateBtn');
+    const analyzeBtn = document.getElementById('analyzeBtn');
+    const analysisSection = document.getElementById('analysisSection');
+    const analysisResultArea = document.getElementById('analysisResultArea');
+    const geminiOutput = document.getElementById('geminiOutput');
+    const geminiExportSection = document.getElementById('geminiExportSection');
+    const copyBtn = document.getElementById('copyBtn');
     const toast = document.getElementById('toast');
 
     let allData = new Map(); 
     let equityChartInstance = null;
-    
+
     const EXPECTED_HEADERS = [
         "日付", "レース名", "コース詳細", "グレード・頭数", "馬番", "馬名", "購入時人気", "購入時オッズ", 
         "評価", "購入時期待値", "購入時クラス", "最終確定人気", "最終確定オッズ", "最終確定期待値", 
@@ -67,12 +64,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function detectAndMapLegacy(row) {
+        // 旧フォーマット検知
         const isLegacy = row["実際オッズ"] !== undefined || row["最終詳細クラス"] !== undefined;
         if (!isLegacy) return row;
+
         const mapped = {};
         mapped["日付"] = row["日付"] || "Legacy";
         mapped["レース名"] = row["レース名"];
-        mapped["コース詳細"] = row["コース詳細(開催場も含めた)"] || row["コース詳細"];
+        mapped["コース詳細"] = row["コース詳細(開催場も含めた)"] || row["コース詳細"] || "";
         mapped["グレード・頭数"] = row["レースグレード"] || "-";
         mapped["馬番"] = row["馬番"];
         mapped["馬名"] = row["馬名"];
@@ -88,17 +87,17 @@ document.addEventListener('DOMContentLoaded', () => {
         mapped["着順"] = row["着順"];
         mapped["MAO"] = "-";
         mapped["実行フラグ"] = "-";
-        mapped["単勝払戻"] = row["単勝払戻"];
-        mapped["ワイド払戻"] = row["ワイド払戻"];
-        mapped["三連複払戻"] = row["三連複払戻"];
+        mapped["単勝払戻"] = row["単勝払戻"] || "";
+        mapped["ワイド払戻"] = row["ワイド払戻"] || "";
+        mapped["三連複払戻"] = row["三連複払戻"] || "";
         return mapped;
     }
 
     function getRaceId(row) {
-        const date = row["日付"];
-        const name = row["レース名"];
-        const course = row["コース詳細"];
-        if (!date || date === "Legacy") return `${name}_${course}`;
+        const date = row["日付"] || "Legacy";
+        const name = row["レース名"] || "";
+        const course = row["コース詳細"] || "";
+        if (date === "Legacy") return `${name}_${course}`;
         return `${date}_${name}_${course}`;
     }
 
@@ -110,24 +109,36 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function updateControlPanel() {
-        if (allData.size > 0) { btnIntegrate.disabled = false; btnAnalyze.disabled = false; }
+        if (allData.size > 0) { integrateBtn.disabled = false; analyzeBtn.disabled = false; }
     }
 
-    // --- Integration ---
-    btnIntegrate.addEventListener('click', () => {
+    // --- Integration & Export with Empty Lines ---
+    integrateBtn.addEventListener('click', () => {
         const sortedData = Array.from(allData.values()).sort((a, b) => {
-            if (a["日付"] !== b["日付"]) return a["日付"].localeCompare(b["日付"]);
-            if (a["レース名"] !== b["レース名"]) return a["レース名"].localeCompare(b["レース名"]);
+            const dateA = a["日付"] || "Legacy";
+            const dateB = b["日付"] || "Legacy";
+            if (dateA !== dateB) return dateA.localeCompare(dateB);
+            const rA = getRaceId(a);
+            const rB = getRaceId(b);
+            if (rA !== rB) return rA.localeCompare(rB);
             return parseInt(a["馬番"]) - parseInt(b["馬番"]);
         });
+
         const outputRows = [];
         let lastRaceId = "";
-        sortedData.forEach(row => {
+
+        sortedData.forEach((row, idx) => {
             const currentRaceId = getRaceId(row);
-            if (lastRaceId !== "" && lastRaceId !== currentRaceId) outputRows.push(Array(EXPECTED_HEADERS.length).fill(""));
+            
+            // レースの切り替わりで空行を挿入（1行目以外）
+            if (lastRaceId !== "" && lastRaceId !== currentRaceId) {
+                outputRows.push(Array(EXPECTED_HEADERS.length).fill(""));
+            }
+            
             outputRows.push(EXPECTED_HEADERS.map(h => row[h] || ""));
             lastRaceId = currentRaceId;
         });
+
         const csvContent = Papa.unparse({ fields: EXPECTED_HEADERS, data: outputRows });
         const blob = new Blob(["\uFEFF" + csvContent], { type: 'text/csv;charset=utf-8;' });
         const url = URL.createObjectURL(blob);
@@ -137,173 +148,162 @@ document.addEventListener('DOMContentLoaded', () => {
         link.click();
     });
 
-    // --- Analysis Logic ---
-    btnAnalyze.addEventListener('click', () => {
-        const data = Array.from(allData.values()).filter(d => d["着順"] && d["着順"].trim() !== "");
-        if (data.length === 0) { alert("結果(着順)が入力されたデータがありません。"); return; }
+    // --- Analysis ---
+    analyzeBtn.addEventListener('click', async () => {
+        const activeRows = Array.from(allData.values()).filter(d => d["着順"] && d["着順"].trim() !== "");
+        if (activeRows.length === 0) { alert("着順確定済みのデータが見つかりません。"); return; }
 
-        // 1. 全体サマリー計算
-        const totalSummary = calculateOverall(data);
-        renderSummaryHeader(totalSummary);
+        // 1. 各集計
+        const classStats = calculateByGroup(activeRows, "最終確定クラス");
+        const maoStats = calculateByGroup(activeRows, "実行フラグ");
+        
+        // 2. 画面描画 (innerHTML)
+        renderResults(classStats, maoStats);
+        
+        // 3. グラフ描画
+        drawEquityCurve(activeRows);
+        
+        // 4. Markdown生成
+        const md = generateMD(classStats, maoStats, activeRows);
+        geminiOutput.value = md;
 
-        // 2. クラス別解析 (信頼性・CLV・スコア含む)
-        const classStats = calculateClassStats(data);
-        renderClassTable(classStats);
+        // 5. UX: 自動コピー & 通知
+        try {
+            await navigator.clipboard.writeText(md);
+            showToast("解析完了：サマリーをコピーしました");
+        } catch (err) {
+            console.error("Clipboard copy failed", err);
+            alert("解析完了：結果を表示しました（コピーは手動で行ってください）");
+        }
 
-        // 3. MAO解析
-        const maoStats = calculateMaoStats(data);
-        renderMaoTable(maoStats);
-
-        // 4. Equity Curve 描画
-        drawEquityCurve(data);
-
-        // 5. Geminiサマリー生成
-        const md = generateMarkdown(totalSummary, classStats, maoStats);
-        markdownOutput.value = md;
-
-        // UI Feedback & Auto-copy
-        analysisView.classList.remove('hidden');
-        geminiExport.classList.remove('hidden');
-        copyToClipboard(md);
-        showToast();
+        // 表示切り替え
+        analysisSection.classList.remove('hidden');
+        geminiExportSection.classList.remove('hidden');
     });
 
-    function calculateOverall(data) {
-        const raceCount = new Set(data.map(d => getRaceId(d))).size;
-        const horseCount = data.length;
-        const totalInvest = horseCount * 100;
-        const totalReturn = data.reduce((acc, row) => acc + (parseInt(row["着順"]) === 1 ? (parseFloat(row["最終確定オッズ"]) * 100) : 0), 0);
-        return { raceCount, horseCount, roi: (totalReturn / totalInvest) * 100 };
-    }
-
-    function calculateClassStats(data) {
+    function calculateByGroup(rows, key) {
         const groups = {};
-        data.forEach(row => {
-            const cls = row["最終確定クラス"] || row["購入時クラス"] || "不明";
-            if (!groups[cls]) groups[cls] = [];
-            groups[cls].push(row);
+        rows.forEach(r => {
+            const val = r[key] || (key === "最終確定クラス" ? r["購入時クラス"] : "-") || "-";
+            if (!groups[val]) groups[val] = [];
+            groups[val].push(r);
         });
 
-        return Object.keys(groups).sort().map(cls => {
-            const rows = groups[cls];
-            const sample = rows.length;
-            const wins = rows.filter(r => parseInt(r["着順"]) === 1).length;
-            const top3 = rows.filter(r => parseInt(r["着順"]) <= 3).length;
+        return Object.keys(groups).sort().map(val => {
+            const groupRows = groups[val];
+            const sample = groupRows.length;
+            const winCount = groupRows.filter(r => parseInt(r["着順"]) === 1).length;
+            const top3Count = groupRows.filter(r => parseInt(r["着順"]) <= 3).length;
             
             let totalReturn = 0;
             let totalClv = 0;
-            rows.forEach(r => {
+            groupRows.forEach(r => {
                 const finalOdds = parseFloat(r["最終確定オッズ"]) || 0;
                 const purchaseOdds = parseFloat(r["購入時オッズ"]) || finalOdds;
                 if (parseInt(r["着順"]) === 1) totalReturn += (finalOdds * 100);
                 if (finalOdds > 0) totalClv += (purchaseOdds / finalOdds);
             });
 
-            const roi = (totalReturn / (sample * 100)) * 100;
-            const clv = totalClv / sample;
-            const avgEv = rows.reduce((acc, r) => acc + (parseFloat(r["最終確定期待値"]) || 0), 0) / sample;
-
-            return { cls, sample, winRate: (wins / sample) * 100, top3Rate: (top3 / sample) * 100, roi, avgEv, clv };
+            return {
+                label: val,
+                sample,
+                winRate: (winCount / sample) * 100,
+                top3Rate: (top3Count / sample) * 100,
+                roi: (totalReturn / (sample * 100)) * 100,
+                avgEv: groupRows.reduce((a, r) => a + (parseFloat(r["最終確定期待値"]) || 0), 0) / sample,
+                clv: totalClv / sample,
+                reliability: sample >= 30 ? "✅" : "⚠️"
+            };
         });
     }
 
-    function calculateMaoStats(data) {
-        const maoGroups = { "○": [], "×": [] };
-        data.forEach(row => {
-            const flag = row["実行フラグ"];
-            if (maoGroups[flag]) maoGroups[flag].push(row);
-        });
-
-        return Object.keys(maoGroups).map(flag => {
-            const rows = maoGroups[flag];
-            const sample = rows.length;
-            if (sample === 0) return null;
-            const wins = rows.filter(r => parseInt(r["着順"]) === 1).length;
-            const top3 = rows.filter(r => parseInt(r["着順"]) <= 3).length;
-            const totalReturn = rows.reduce((acc, r) => acc + (parseInt(r["着順"]) === 1 ? (parseFloat(r["最終確定オッズ"]) * 100) : 0), 0);
-            return { flag, sample, winRate: (wins / sample) * 100, top3Rate: (top3 / sample) * 100, roi: (totalReturn / (sample * 100)) * 100, avgEv: rows.reduce((acc, r) => acc + (parseFloat(r["最終確定期待値"]) || 0), 0) / sample };
-        }).filter(s => s !== null);
-    }
-
-    function renderSummaryHeader(s) {
-        analysisSummary.innerHTML = `
-            <div class="glass-panel text-center p-4">
-                <p class="text-sm text-slate-400">総レース数</p>
-                <p class="text-2xl font-bold">${s.raceCount}</p>
+    function renderResults(classStats, maoStats) {
+        let html = `
+            <div class="mb-12">
+                <h3 class="text-xl font-bold mb-4 text-white">● クラス別成績</h3>
+                <div class="overflow-x-auto">
+                    <table class="analysis-table w-full">
+                        <thead>
+                            <tr>
+                                <th>クラス</th>
+                                <th>頭数</th>
+                                <th>1着率</th>
+                                <th>3着内率</th>
+                                <th>回収率</th>
+                                <th>CLV</th>
+                                <th>平均EV</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${classStats.map(s => `
+                                <tr>
+                                    <td>${s.reliability} ${s.label}</td>
+                                    <td>${s.sample}</td>
+                                    <td>${s.winRate.toFixed(1)}%</td>
+                                    <td>${s.top3Rate.toFixed(1)}%</td>
+                                    <td class="${s.roi >= 100 ? 'text-green-400 font-bold' : ''}">${s.roi.toFixed(1)}%</td>
+                                    <td class="${s.clv >= 1.05 ? 'text-blue-400' : ''}">${s.clv.toFixed(2)}</td>
+                                    <td>${s.avgEv.toFixed(3)}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
             </div>
-            <div class="glass-panel text-center p-4">
-                <p class="text-sm text-slate-400">対象馬数</p>
-                <p class="text-2xl font-bold">${s.horseCount}</p>
-            </div>
-            <div class="glass-panel text-center p-4">
-                <p class="text-sm text-slate-400">全体単勝回収率</p>
-                <p class="text-2xl font-bold ${s.roi >= 100 ? 'text-green-400' : 'text-red-400'}">${s.roi.toFixed(1)}%</p>
+
+            <div class="mb-12">
+                <h3 class="text-xl font-bold mb-4 text-purple-400">● MAOフィルター分析 (○=監査合格)</h3>
+                <div class="overflow-x-auto">
+                    <table class="analysis-table w-full">
+                        <thead>
+                            <tr>
+                                <th>実行フラグ</th>
+                                <th>頭数</th>
+                                <th>1着率</th>
+                                <th>3着内率</th>
+                                <th>回収率</th>
+                                <th>平均EV</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${maoStats.filter(s => s.label === "○" || s.label === "×").map(s => `
+                                <tr>
+                                    <td class="font-bold">${s.label}</td>
+                                    <td>${s.sample}</td>
+                                    <td>${s.winRate.toFixed(1)}%</td>
+                                    <td>${s.top3Rate.toFixed(1)}%</td>
+                                    <td>${s.roi.toFixed(1)}%</td>
+                                    <td>${s.avgEv.toFixed(3)}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
             </div>
         `;
+        analysisResultArea.innerHTML = html;
     }
 
-    function renderClassTable(stats) {
-        analysisTbody.innerHTML = '';
-        stats.forEach(s => {
-            const reliability = s.sample >= 30 ? '✅' : '⚠️';
-            const tr = document.createElement('tr');
-            tr.innerHTML = `
-                <td class="font-bold">${reliability} ${s.cls}</td>
-                <td>${s.sample}</td>
-                <td>${s.winRate.toFixed(1)}%</td>
-                <td>${s.top3Rate.toFixed(1)}%</td>
-                <td class="${s.roi >= 100 ? 'text-green-400 font-bold' : ''}">${s.roi.toFixed(1)}%</td>
-                <td class="${s.clv >= 1.05 ? 'text-blue-400' : ''}">${s.clv.toFixed(2)}</td>
-                <td>${s.avgEv.toFixed(3)}</td>
-            `;
-            analysisTbody.appendChild(tr);
-        });
-    }
-
-    function renderMaoTable(stats) {
-        maoTbody.innerHTML = '';
-        stats.forEach(s => {
-            const tr = document.createElement('tr');
-            tr.innerHTML = `
-                <td class="font-bold ${s.flag === '○' ? 'text-green-400' : 'text-red-400'}">${s.flag}</td>
-                <td>${s.sample}</td>
-                <td>${s.winRate.toFixed(1)}%</td>
-                <td>${s.top3Rate.toFixed(1)}%</td>
-                <td>${s.roi.toFixed(1)}%</td>
-                <td>${s.avgEv.toFixed(3)}</td>
-            `;
-            maoTbody.appendChild(tr);
-        });
-    }
-
-    function drawEquityCurve(data) {
-        const sortedByRace = [...data].sort((a, b) => getRaceId(a).localeCompare(getRaceId(b)));
-        const labels = [];
-        const expectedData = [];
-        const actualData = [];
-        
-        let cumulativeInvest = 0;
-        let cumulativeExpected = 0;
-        let cumulativeActual = 0;
-
-        // レース単位で集計
+    function drawEquityCurve(rows) {
+        // 時系列ソート
+        const sorted = [...rows].sort((a, b) => getRaceId(a).localeCompare(getRaceId(b)));
         const raceMap = {};
-        sortedByRace.forEach(d => {
-            const id = getRaceId(d);
-            if (!raceMap[id]) raceMap[id] = [];
-            raceMap[id].push(d);
-        });
+        sorted.forEach(r => { const id = getRaceId(r); if (!raceMap[id]) raceMap[id] = []; raceMap[id].push(r); });
+
+        const labels = [];
+        const expData = [];
+        const actData = [];
+        let cumExp = 0; let cumAct = 0;
 
         Object.keys(raceMap).forEach((id, idx) => {
             const raceRows = raceMap[id];
             raceRows.forEach(r => {
-                cumulativeInvest += 100;
-                cumulativeExpected += (parseFloat(r["最終確定期待値"]) || 0) * 100;
-                if (parseInt(r["着順"]) === 1) cumulativeActual += (parseFloat(r["最終確定オッズ"]) || 0) * 100;
+                cumExp += (parseFloat(r["最終確定期待値"]) || 0) * 100;
+                if (parseInt(r["着順"]) === 1) cumAct += (parseFloat(r["最終確定オッズ"]) || 0) * 100;
             });
             labels.push(`Race ${idx + 1}`);
-            expectedData.push(cumulativeExpected);
-            actualData.push(cumulativeActual);
+            expData.push(cumExp);
+            actData.push(cumAct);
         });
 
         if (equityChartInstance) equityChartInstance.destroy();
@@ -313,65 +313,58 @@ document.addEventListener('DOMContentLoaded', () => {
             data: {
                 labels,
                 datasets: [
-                    { label: '累積期待払戻(理論値)', data: expectedData, borderColor: '#60a5fa', tension: 0.1, pointRadius: 0 },
-                    { label: '累積実払戻(実績)', data: actualData, borderColor: '#4ade80', tension: 0.1, pointRadius: 0 }
+                    { label: '累積期待払戻額', data: expData, borderColor: '#3b82f6', tension: 0.1, pointRadius: 0 },
+                    { label: '累積実払戻額', data: actData, borderColor: '#ef4444', tension: 0.1, pointRadius: 0 }
                 ]
             },
-            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: '#e2e8f0' } } }, scales: { x: { display: false }, y: { grid: { color: 'rgba(255,255,255,0.1)' }, ticks: { color: '#94a3b8' } } } }
+            options: { 
+                responsive: true, maintainAspectRatio: false, 
+                plugins: { legend: { labels: { color: '#e2e8f0' } } },
+                scales: { 
+                    x: { display: false }, 
+                    y: { grid: { color: 'rgba(255,255,255,0.1)' }, ticks: { color: '#94a3b8' } } 
+                }
+            }
         });
     }
 
-    function generateMarkdown(summary, classStats, maoStats) {
-        let md = "### 全体解析サマリー\n";
-        md += `- 総レース数: ${summary.raceCount}\n- 総対象馬数: ${summary.horseCount}\n- 全体単勝回収率: **${summary.roi.toFixed(1)}%**\n\n`;
+    function generateMD(classStats, maoStats, allRows) {
+        const overallSample = allRows.length;
+        const overallReturn = allRows.reduce((acc, r) => acc + (parseInt(r["着順"]) === 1 ? (parseFloat(r["最終確定オッズ"]) * 100) : 0), 0);
+        const overallROI = (overallReturn / (overallSample * 100)) * 100;
 
-        md += "### クラス別パフォーマンスレポート\n";
-        md += "| 信頼性 | クラス | 頭数 | 1着率 | 3着内率 | 回収率 | CLV | 平均EV |\n";
-        md += "|---|---|---|---|---|---|---|---|\n";
+        let md = `### 全体パフォーマンス\n- 総対象数: ${overallSample}\n- 全体回収率: **${overallROI.toFixed(1)}%**\n\n`;
+        
+        md += `### クラス別成績報告\n| 信頼 | クラス | 頭数 | 的中率 | 複勝率 | 回収率 | CLV | EV |\n|---|---|---|---|---|---|---|---|\n`;
         classStats.forEach(s => {
-            const rel = s.sample >= 30 ? "✅ (信頼)" : "⚠️ (不足)";
-            const highlight = s.clv >= 1.05 ? "🌟" : "";
-            md += `| ${rel} | ${s.cls} | ${s.sample} | ${s.winRate.toFixed(1)}% | ${s.top3Rate.toFixed(1)}% | ${s.roi.toFixed(1)}% | ${s.clv.toFixed(2)}${highlight} | ${s.avgEv.toFixed(3)} |\n`;
+            md += `| ${s.reliability} | ${s.label} | ${s.sample} | ${s.winRate.toFixed(1)}% | ${s.top3Rate.toFixed(1)}% | ${s.roi.toFixed(1)}% | ${s.clv.toFixed(2)} | ${s.avgEv.toFixed(3)} |\n`;
         });
 
-        md += "\n### MAOフィルター（実行フラグ）分析\n";
-        md += "| フラグ | 頭数 | 1着率 | 3着内率 | 回収率 | 平均EV |\n";
-        md += "|---|---|---|---|---|---|\n";
-        maoStats.forEach(s => {
-            md += `| ${s.flag} | ${s.sample} | ${s.winRate.toFixed(1)}% | ${s.top3Rate.toFixed(1)}% | ${s.roi.toFixed(1)}% | ${s.avgEv.toFixed(3)} |\n`;
-        });
+        const maoFiltered = maoStats.filter(s => s.label === "○" || s.label === "×");
+        if (maoFiltered.length > 0) {
+            md += `\n### MAOフィルター分析\n| フラグ | 頭数 | 的中率 | 複勝率 | 回収率 | EV |\n|---|---|---|---|---|---|\n`;
+            maoFiltered.forEach(s => {
+                md += `| ${s.label} | ${s.sample} | ${s.winRate.toFixed(1)}% | ${s.top3Rate.toFixed(1)}% | ${s.roi.toFixed(1)}% | ${s.avgEv.toFixed(3)} |\n`;
+            });
+        }
 
-        // 推奨戦略
         const anchor = [...classStats].sort((a,b) => b.top3Rate - a.top3Rate)[0];
         const striker = [...classStats].sort((a,b) => b.roi - a.roi)[0];
-        md += "\n### 📈 3連複・推奨戦略\n";
-        md += `- **軸適正 (Anchor)**: ${anchor.cls} (3着内率: ${anchor.top3Rate.toFixed(1)}%)\n`;
-        md += `- **爆発力 (Striker)**: ${striker.cls} (回収率: ${striker.roi.toFixed(1)}%)\n\n`;
-        
-        md += "---\n**Gemini 3 への依頼用プロンプト:**\n";
-        md += "上記のデータに基づき、回収率と安定性を最大化するために、3連複の1列目（軸）と単勝（Striker）に設定すべきクラスの組み合わせを考察してください。";
+
+        md += `\n### 3連複・推奨戦略\n- **軸適正 (Anchor)**: ${anchor.label} (複勝率: ${anchor.top3Rate.toFixed(1)}%)\n- **爆発力 (Striker)**: ${striker.label} (回収率: ${striker.roi.toFixed(1)}%)\n\n---\n**考察依頼:**\n3連複・推奨戦略: 3着以内率（軸適正）と単勝回収率（爆発力）に基づき、軸と相手の最適解を考察してください。`;
         
         return md;
     }
 
-    function copyToClipboard(text) {
-        const temp = document.createElement("textarea");
-        document.body.appendChild(temp);
-        temp.value = text;
-        temp.select();
-        document.execCommand("copy");
-        document.body.removeChild(temp);
-    }
-
-    function showToast() {
+    function showToast(msg) {
+        toast.textContent = msg;
         toast.classList.add('show');
         setTimeout(() => toast.classList.remove('show'), 3000);
     }
 
-    btnCopyMarkdown.addEventListener('click', () => {
-        markdownOutput.select();
+    copyBtn.addEventListener('click', () => {
+        geminiOutput.select();
         document.execCommand('copy');
-        btnCopyMarkdown.textContent = 'コピー完了！';
-        setTimeout(() => btnCopyMarkdown.textContent = 'クリップボードにコピー', 2000);
+        showToast("コピーしました！");
     });
 });
