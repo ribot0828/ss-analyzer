@@ -1,4 +1,4 @@
-/**
+﻿/**
  * SS-Analyzer Ultimate v3.0 | アルティメット統合・解析・シミュレーター
  * Core Logic (analyzer.js)
  */
@@ -336,22 +336,88 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // --- 推奨度（評価）別パフォーマンス ---
+    // --- 推奨度（SSS/SS/S/Low）別パフォーマンス ---
+    // SS-Engine Ver.5.22 仕様に基づくレース単位の推奨度算出
+
+    const PLACE_CORE_CLASSES = ['S0', 'S1', 'S2', 'A0', 'B0+', 'A1', 'C0', 'B0'];
+    const AXIS_CLASSES = ['S0', 'S1', 'S2', 'A0', 'B0+', 'A1', 'C0'];
+
+    function calculateSSDensity(raceHorses) {
+        // EV ≥ 1.300 かつ 評価が S/A/B/D の馬を数える
+        const qualifiedCount = raceHorses.filter(h => {
+            const ev = parseFloat(h["最終確定期待値"]) || parseFloat(h["購入時期待値"]) || 0;
+            const rating = (h["評価"] || "").toUpperCase().trim();
+            return ev >= 1.300 && ['S', 'A', 'B', 'D'].includes(rating);
+        }).length;
+
+        const validCount = raceHorses.filter(h => {
+            const odds = parseFloat(h["最終確定オッズ"]) || parseFloat(h["購入時オッズ"]) || 0;
+            return odds > 0;
+        }).length;
+
+        const denominator = Math.max(12, validCount);
+        return qualifiedCount / denominator;
+    }
+
+    function determineRecommendation(raceHorses) {
+        const density = calculateSSDensity(raceHorses);
+        const classes = raceHorses.map(h => (h["最終確定クラス"] || h["購入時クラス"] || "").trim());
+
+        const hasS0orS1 = classes.some(c => c === 'S0' || c === 'S1');
+        const hasAxis = classes.some(c => AXIS_CLASSES.includes(c));
+
+        if (density >= 0.250 && hasS0orS1) return 'SSS';
+        if (density >= 0.250 && hasAxis) return 'SS';
+        if (density >= 0.150) return 'S';
+        return 'Low';
+    }
+
     function calculateRecommendationStats(data) {
-        const groups = {};
+        // 1. まずレース単位にグルーピング
+        const raceMap = {};
         data.forEach(r => {
-            const rec = r["評価"] || "不明";
-            if (!groups[rec]) groups[rec] = [];
-            groups[rec].push(r);
+            const id = getRaceId(r);
+            if (!raceMap[id]) raceMap[id] = [];
+            raceMap[id].push(r);
         });
 
-        return Object.keys(groups).sort().map(rec => {
-            const rows = groups[rec];
+        // 全データからもレースをグループ化（着順未確定馬も含めてSS密度を正確に計算）
+        const allRaceMap = {};
+        Array.from(allData.values()).forEach(r => {
+            const id = getRaceId(r);
+            if (!allRaceMap[id]) allRaceMap[id] = [];
+            allRaceMap[id].push(r);
+        });
+
+        // 2. 各レースに推奨度を付与
+        const recGroups = { 'SSS': [], 'SS': [], 'S': [], 'Low': [] };
+        const recRaces = { 'SSS': [], 'SS': [], 'S': [], 'Low': [] };
+
+        Object.keys(raceMap).forEach(id => {
+            // SS密度は全出走馬で計算（着順の有無に関わらず）
+            const allHorsesInRace = allRaceMap[id] || raceMap[id];
+            const rec = determineRecommendation(allHorsesInRace);
+            
+            // 着順確定済みの馬だけを成績集計に使う
+            const resultHorses = raceMap[id];
+            recGroups[rec].push(...resultHorses);
+            recRaces[rec].push({ id, horses: resultHorses });
+        });
+
+        // 3. 推奨度ごとの成績を算出
+        const order = ['SSS', 'SS', 'S', 'Low'];
+        return order.map(rec => {
+            const rows = recGroups[rec];
+            const races = recRaces[rec];
             const sample = rows.length;
+            const raceCount = races.length;
+
+            if (sample === 0) return { rec, sample: 0, raceCount: 0, winRate: 0, top3Rate: 0, winROI: 0, trioHitRate: 0, trioROI: 0, density: '-' };
+
             const wins = rows.filter(r => parseInt(r["着順"]) === 1).length;
             const top3 = rows.filter(r => parseInt(r["着順"]) <= 3).length;
 
-            // 単勝回収率: 1着時のオッズ × 100 の合計 / 投資額
+            // 単勝回収率
             const winReturn = rows.reduce((acc, r) => {
                 if (parseInt(r["着順"]) === 1) {
                     return acc + ((parseFloat(r["最終確定オッズ"]) || 0) * 100);
@@ -361,46 +427,39 @@ document.addEventListener('DOMContentLoaded', () => {
             const winROI = (winReturn / (sample * 100)) * 100;
 
             // 三連複: レース単位で的中判定
-            const raceMap = {};
-            rows.forEach(r => {
-                const id = getRaceId(r);
-                if (!raceMap[id]) raceMap[id] = { rows: [], payout: 0 };
-                raceMap[id].rows.push(r);
-            });
-            // 三連複は全データから3着以内を取得する必要がある
             let trioHits = 0;
-            let trioRaces = 0;
             let trioReturn = 0;
-            Object.keys(raceMap).forEach(id => {
-                trioRaces++;
-                const payout = parseFloat(raceMap[id].rows[0]["三連複払戻"]) || 0;
+            races.forEach(race => {
+                const payout = parseFloat(race.horses[0]["三連複払戻"]) || 0;
                 if (payout > 0) {
                     trioHits++;
                     trioReturn += payout;
                 }
             });
-            const trioROI = trioRaces > 0 ? (trioReturn / (trioRaces * 100)) * 100 : 0;
-            const trioHitRate = trioRaces > 0 ? (trioHits / trioRaces) * 100 : 0;
+            const trioROI = raceCount > 0 ? (trioReturn / (raceCount * 100)) * 100 : 0;
+            const trioHitRate = raceCount > 0 ? (trioHits / raceCount) * 100 : 0;
 
             return {
-                rec, sample,
+                rec, sample, raceCount,
                 winRate: (wins / sample) * 100,
                 top3Rate: (top3 / sample) * 100,
                 winROI,
                 trioHitRate,
                 trioROI
             };
-        });
+        }).filter(s => s.sample > 0);
     }
 
     function renderRecommendationTable(stats) {
+        const recColors = { 'SSS': 'text-yellow-300', 'SS': 'text-orange-400', 'S': 'text-blue-400', 'Low': 'text-slate-400' };
         let html = `
             <div class="overflow-x-auto">
                 <table class="analysis-table w-full text-sm">
                     <thead>
                         <tr>
                             <th>推奨度</th>
-                            <th>頭数</th>
+                            <th>レース数</th>
+                            <th>対象馬数</th>
                             <th>単勝的中率</th>
                             <th>3着内率</th>
                             <th>単勝回収率</th>
@@ -411,7 +470,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     <tbody>
                         ${stats.map(s => `
                             <tr>
-                                <td class="font-bold">${s.rec}</td>
+                                <td class="font-bold ${recColors[s.rec] || ''}">${s.rec}</td>
+                                <td>${s.raceCount}</td>
                                 <td>${s.sample}</td>
                                 <td>${s.winRate.toFixed(1)}%</td>
                                 <td>${s.top3Rate.toFixed(1)}%</td>
@@ -653,10 +713,10 @@ document.addEventListener('DOMContentLoaded', () => {
             md += `| ${s.cls} | ${s.sample} | ${s.winRate.toFixed(1)}% | ${s.roi.toFixed(1)}% | ${s.avgEv.toFixed(3)} | **${s.kelly.toFixed(1)}%** |\n`;
         });
 
-        md += `\n## 3. 推奨度（評価）別パフォーマンス\n`;
-        md += `| 推奨度 | 頭数 | 単勝的中率 | 3着内率 | 単勝回収率 | 三連複的中率 | 三連複回収率 |\n|---|---|---|---|---|---|---|\n`;
+        md += `\n## 3. 推奨度別パフォーマンス（SS密度基準: SSS/SS/S/Low）\n`;
+        md += `| 推奨度 | レース数 | 対象馬数 | 単勝的中率 | 3着内率 | 単勝回収率 | 三連複的中率 | 三連複回収率 |\n|---|---|---|---|---|---|---|---|\n`;
         recStats.forEach(s => {
-            md += `| ${s.rec} | ${s.sample} | ${s.winRate.toFixed(1)}% | ${s.top3Rate.toFixed(1)}% | ${s.winROI.toFixed(1)}% | ${s.trioHitRate.toFixed(1)}% | ${s.trioROI.toFixed(1)}% |\n`;
+            md += `| ${s.rec} | ${s.raceCount} | ${s.sample} | ${s.winRate.toFixed(1)}% | ${s.top3Rate.toFixed(1)}% | ${s.winROI.toFixed(1)}% | ${s.trioHitRate.toFixed(1)}% | ${s.trioROI.toFixed(1)}% |\n`;
         });
 
         md += `\n## 4. 異常値（Outlier）分析リスト\n`;
