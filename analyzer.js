@@ -12,6 +12,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const mainAnalysisView = document.getElementById('main-analysis-view');
     const riskDashboard = document.getElementById('risk-dashboard');
     const analysisResultArea = document.getElementById('analysisResultArea');
+    const recommendationResultArea = document.getElementById('recommendationResultArea');
     const simulatorResultArea = document.getElementById('simulatorResultArea');
     const simChartContainer = document.getElementById('simChartContainer');
     const outlierResultArea = document.getElementById('outlierResultArea');
@@ -231,7 +232,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     function performFullAnalysis() {
-        // Result table, Charts, Risk, Outliers
         const rowsWithRank = filteredData.filter(d => d["着順"] && d["着順"].trim() !== "");
         
         // 1. Risk Stats
@@ -242,15 +242,19 @@ document.addEventListener('DOMContentLoaded', () => {
         const classStats = calculateClassStats(rowsWithRank);
         renderClassTable(classStats);
 
-        // 3. Equity Curve
+        // 3. 推奨度別パフォーマンス
+        const recStats = calculateRecommendationStats(rowsWithRank);
+        renderRecommendationTable(recStats);
+
+        // 4. Equity Curve
         drawEquityCurve(rowsWithRank);
 
-        // 4. Outliers
+        // 5. Outliers
         const outliers = detectOutliers(rowsWithRank);
         renderOutliers(outliers);
 
-        // 5. Build Markdown
-        const md = generateUltimateMarkdown(riskStats, classStats, outliers);
+        // 6. Build Markdown
+        const md = generateUltimateMarkdown(riskStats, classStats, recStats, outliers);
         geminiOutput.value = md;
     }
 
@@ -330,6 +334,97 @@ document.addEventListener('DOMContentLoaded', () => {
                 kelly
             };
         });
+    }
+
+    // --- 推奨度（評価）別パフォーマンス ---
+    function calculateRecommendationStats(data) {
+        const groups = {};
+        data.forEach(r => {
+            const rec = r["評価"] || "不明";
+            if (!groups[rec]) groups[rec] = [];
+            groups[rec].push(r);
+        });
+
+        return Object.keys(groups).sort().map(rec => {
+            const rows = groups[rec];
+            const sample = rows.length;
+            const wins = rows.filter(r => parseInt(r["着順"]) === 1).length;
+            const top3 = rows.filter(r => parseInt(r["着順"]) <= 3).length;
+
+            // 単勝回収率: 1着時のオッズ × 100 の合計 / 投資額
+            const winReturn = rows.reduce((acc, r) => {
+                if (parseInt(r["着順"]) === 1) {
+                    return acc + ((parseFloat(r["最終確定オッズ"]) || 0) * 100);
+                }
+                return acc;
+            }, 0);
+            const winROI = (winReturn / (sample * 100)) * 100;
+
+            // 三連複: レース単位で的中判定
+            const raceMap = {};
+            rows.forEach(r => {
+                const id = getRaceId(r);
+                if (!raceMap[id]) raceMap[id] = { rows: [], payout: 0 };
+                raceMap[id].rows.push(r);
+            });
+            // 三連複は全データから3着以内を取得する必要がある
+            let trioHits = 0;
+            let trioRaces = 0;
+            let trioReturn = 0;
+            Object.keys(raceMap).forEach(id => {
+                trioRaces++;
+                const payout = parseFloat(raceMap[id].rows[0]["三連複払戻"]) || 0;
+                if (payout > 0) {
+                    trioHits++;
+                    trioReturn += payout;
+                }
+            });
+            const trioROI = trioRaces > 0 ? (trioReturn / (trioRaces * 100)) * 100 : 0;
+            const trioHitRate = trioRaces > 0 ? (trioHits / trioRaces) * 100 : 0;
+
+            return {
+                rec, sample,
+                winRate: (wins / sample) * 100,
+                top3Rate: (top3 / sample) * 100,
+                winROI,
+                trioHitRate,
+                trioROI
+            };
+        });
+    }
+
+    function renderRecommendationTable(stats) {
+        let html = `
+            <div class="overflow-x-auto">
+                <table class="analysis-table w-full text-sm">
+                    <thead>
+                        <tr>
+                            <th>推奨度</th>
+                            <th>頭数</th>
+                            <th>単勝的中率</th>
+                            <th>3着内率</th>
+                            <th>単勝回収率</th>
+                            <th>三連複的中率</th>
+                            <th>三連複回収率</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${stats.map(s => `
+                            <tr>
+                                <td class="font-bold">${s.rec}</td>
+                                <td>${s.sample}</td>
+                                <td>${s.winRate.toFixed(1)}%</td>
+                                <td>${s.top3Rate.toFixed(1)}%</td>
+                                <td class="${s.winROI >= 100 ? 'text-green-400 font-bold' : ''}">${s.winROI.toFixed(1)}%</td>
+                                <td>${s.trioHitRate.toFixed(1)}%</td>
+                                <td class="${s.trioROI >= 100 ? 'text-green-400 font-bold' : ''}">${s.trioROI.toFixed(1)}%</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        `;
+        recommendationResultArea.innerHTML = html;
     }
 
     function detectOutliers(data) {
@@ -544,7 +639,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- Markdown Export ---
-    function generateUltimateMarkdown(risk, stats, outliers) {
+    function generateUltimateMarkdown(risk, stats, recStats, outliers) {
         let md = `# SS-Analyzer Ultimate 解析レポート\n\n`;
         md += `## 1. リスク・収支ダッシュボード\n`;
         md += `- 全体回収率: **${risk.roi.toFixed(1)}%**\n`;
@@ -558,7 +653,13 @@ document.addEventListener('DOMContentLoaded', () => {
             md += `| ${s.cls} | ${s.sample} | ${s.winRate.toFixed(1)}% | ${s.roi.toFixed(1)}% | ${s.avgEv.toFixed(3)} | **${s.kelly.toFixed(1)}%** |\n`;
         });
 
-        md += `\n## 3. 異常値（Outlier）分析リスト\n`;
+        md += `\n## 3. 推奨度（評価）別パフォーマンス\n`;
+        md += `| 推奨度 | 頭数 | 単勝的中率 | 3着内率 | 単勝回収率 | 三連複的中率 | 三連複回収率 |\n|---|---|---|---|---|---|---|\n`;
+        recStats.forEach(s => {
+            md += `| ${s.rec} | ${s.sample} | ${s.winRate.toFixed(1)}% | ${s.top3Rate.toFixed(1)}% | ${s.winROI.toFixed(1)}% | ${s.trioHitRate.toFixed(1)}% | ${s.trioROI.toFixed(1)}% |\n`;
+        });
+
+        md += `\n## 4. 異常値（Outlier）分析リスト\n`;
         if (outliers.length > 0) {
             md += `| 日付 | レース | 馬名 | EV | 着順 |\n|---|---|---|---|---|\n`;
             outliers.slice(0, 10).forEach(o => {
@@ -570,8 +671,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         md += `\n---\n### ✨ Gemini 3 解析プロンプト\n`;
-        md += `上記の「リスク管理指標」と「異常値リスト」に基づき、以下の点を詳細に分析してください。\n`;
-        md += `1. 回収率を上げるために除外すべきクラス、または特定の環境条件（会場・距離）は存在するか。\n`;
+        md += `上記の「リスク管理指標」「推奨度別成績」「異常値リスト」に基づき、以下の点を詳細に分析してください。\n`;
+        md += `1. 回収率を上げるために除外すべきクラスや推奨度、または特定の環境条件（会場・距離）は存在するか。\n`;
         md += `2. 異常値リストに共通する特徴（例：特定の会場での期待値暴落、あるいはMAOフィルターの漏れ）を特定してください。\n`;
         md += `3. 最大ドローダウンを 10% 以下に抑えつつ、利益を最大化するための資金配分（ケリー基準の調整案）を提案してください。`;
 
@@ -580,13 +681,41 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Others ---
     integrateBtn.addEventListener('click', () => {
-        const sortedData = Array.from(allData.values()).sort((a,b) => a["日付"].localeCompare(b["日付"]));
-        const csv = Papa.unparse(sortedData);
-        const blob = new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8;' });
+        const sortedData = Array.from(allData.values()).sort((a, b) => {
+            const dateA = a["日付"] || "Legacy";
+            const dateB = b["日付"] || "Legacy";
+            if (dateA !== dateB) return dateA.localeCompare(dateB);
+            const rA = getRaceId(a);
+            const rB = getRaceId(b);
+            if (rA !== rB) return rA.localeCompare(rB);
+            return parseInt(a["馬番"]) - parseInt(b["馬番"]);
+        });
+
+        // レース間に空行を挿入
+        const outputRows = [];
+        let lastRaceId = "";
+        sortedData.forEach(row => {
+            const currentRaceId = getRaceId(row);
+            if (lastRaceId !== "" && lastRaceId !== currentRaceId) {
+                outputRows.push(Array(EXPECTED_HEADERS.length).fill(""));
+            }
+            outputRows.push(EXPECTED_HEADERS.map(h => row[h] || ""));
+            lastRaceId = currentRaceId;
+        });
+
+        const csvContent = Papa.unparse({ fields: EXPECTED_HEADERS, data: outputRows });
+        const blob = new Blob(["\uFEFF" + csvContent], { type: 'text/csv;charset=utf-8;' });
+
+        // 最新日付をファイル名に含める
+        const dates = sortedData.map(d => d["日付"]).filter(d => d && d !== "Legacy").sort();
+        const latestDate = dates.length > 0 ? dates[dates.length - 1] : new Date().toISOString().split('T')[0];
+        const safeDate = latestDate.replace(/\//g, '-');
+
         const link = document.createElement('a');
         link.href = URL.createObjectURL(blob);
-        link.download = `SS_Ultimate_Integrated.csv`;
+        link.download = `SS_Integrated_${safeDate}.csv`;
         link.click();
+        showToast(`統合CSV出力完了 (最新: ${latestDate})`);
     });
 
     copyBtn.addEventListener('click', () => {
