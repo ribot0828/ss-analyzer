@@ -1,4 +1,4 @@
-﻿/**
+/**
  * SS-Analyzer Ultimate v3.0 | アルティメット統合・解析・シミュレーター
  * Core Logic (analyzer.js)
  */
@@ -434,20 +434,48 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
+        let actualWinPayoutMap = {};
+        let actualTrioPayout = 0;
+        raceHorses.forEach(h => {
+            const wVal = parseFloat(h["単勝払戻"]);
+            if (!isNaN(wVal) && wVal > 0) actualWinPayoutMap[h["馬番"]] = wVal;
+            const tVal = parseFloat(h["三連複払戻"]);
+            if (!isNaN(tVal) && tVal > 0) actualTrioPayout = tVal;
+        });
+
         let winReturn = 0;
         finalWinBets.forEach(h => {
-            if (parseInt(h["着順"]) === 1) winReturn += (parseFloat(h["最終確定オッズ"]) || 0) * 100;
+            if (parseInt(h["着順"]) === 1) {
+                const umaban = h["馬番"];
+                if (actualWinPayoutMap[umaban]) {
+                    winReturn += actualWinPayoutMap[umaban];
+                } else {
+                    winReturn += (parseFloat(h["最終確定オッズ"]) || parseFloat(h["購入時オッズ"]) || 0) * 100;
+                }
+            }
         });
 
         let trioReturn = 0;
         let trioHit = false;
         const winners = raceHorses.filter(h => parseInt(h["着順"]) <= 3).map(h => parseInt(h["馬番"])).sort((a,b) => a-b);
-        if (winners.length === 3) {
-            const winningTrio = winners.join('-');
-            if (finalTrioCombos.includes(winningTrio)) {
-                trioHit = true;
-                trioReturn = parseFloat(raceHorses[0]["三連複払戻"]) || 0;
+        if (winners.length >= 3) {
+            const getCombinations = (arr, k) => {
+                let result = [];
+                const f = (prefix, arr) => {
+                    if (prefix.length === k) { result.push(prefix); return; }
+                    for (let i = 0; i < arr.length; i++) f([...prefix, arr[i]], arr.slice(i + 1));
+                };
+                f([], arr);
+                return result;
+            };
+            const combos = getCombinations(winners, 3);
+            for (let c of combos) {
+                if (finalTrioCombos.includes(c.join('-'))) {
+                    trioHit = true;
+                    break;
+                }
             }
+            if (trioHit) trioReturn = actualTrioPayout;
         }
 
         return {
@@ -792,13 +820,30 @@ document.addEventListener('DOMContentLoaded', () => {
             // Check Hit
             const winners = horses.filter(h => parseInt(h["着順"]) <= 3).map(h => parseInt(h["馬番"])).sort((a,b) => a-b);
             let raceReturn = 0;
-            if (winners.length === 3) {
-                const winningTrio = winners.join('-');
-                if (combos.includes(winningTrio)) {
-                    hits++;
-                    // Find actual payout (from any row of the race, since it's race-based)
-                    raceReturn = (parseFloat(horses[0]["三連複払戻"]) || 0);
-                    totalReturn += raceReturn;
+            let actualTrioPayout = 0;
+            horses.forEach(h => {
+                const tVal = parseFloat(h["三連複払戻"]);
+                if (!isNaN(tVal) && tVal > 0) actualTrioPayout = tVal;
+            });
+
+            if (winners.length >= 3) {
+                const getCombinations = (arr, k) => {
+                    let result = [];
+                    const f = (prefix, arr) => {
+                        if (prefix.length === k) { result.push(prefix); return; }
+                        for (let i = 0; i < arr.length; i++) f([...prefix, arr[i]], arr.slice(i + 1));
+                    };
+                    f([], arr);
+                    return result;
+                };
+                const winnerCombos = getCombinations(winners, 3);
+                for (let c of winnerCombos) {
+                    if (combos.includes(c.join('-'))) {
+                        hits++;
+                        raceReturn = actualTrioPayout;
+                        totalReturn += raceReturn;
+                        break;
+                    }
                 }
             }
             cumBalance += (raceReturn - (raceBets * 100));
