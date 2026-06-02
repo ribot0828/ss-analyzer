@@ -273,6 +273,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function enrichHorses(horses) {
         let totalScore = 0;
+        
+        // 1. スコア付与と合計計算
         horses.forEach(h => {
             let score = 0;
             const r = (h["評価"] || "").toUpperCase().trim();
@@ -287,31 +289,61 @@ document.addEventListener('DOMContentLoaded', () => {
                 else if (r === 'F') score = 0.5;
             }
             h.score = score;
+            h.usedOdds = odds;
             totalScore += score;
         });
 
+        // 2. 完全再計算とプロパティ上書き
         horses.forEach(h => {
-            h.expectedWinRate = totalScore > 0 ? h.score / totalScore : 0;
-            const cls = (h["最終確定クラス"] || h["購入時クラス"] || "").trim();
-            const odds = parseFloat(h["最終確定オッズ"]) || parseFloat(h["購入時オッズ"]) || 0;
+            h.expectedWinRate = (totalScore > 0 && h.usedOdds > 0) ? h.score / totalScore : 0;
+            const rawEv = h.expectedWinRate * h.usedOdds;
+            h.calculatedEv = Math.floor(rawEv * 1000 + 1e-9) / 1000;
             
-            let mao = 999;
-            if (h.expectedWinRate > 0) {
-                if (PLACE_CORE_CLASSES_FULL.includes(cls)) mao = 0.50 / h.expectedWinRate;
-                else if (['B1', 'B2', 'B3', 'A2'].includes(cls)) mao = 0.90 / h.expectedWinRate;
-                else if (cls === 'X') mao = 3.00 / h.expectedWinRate;
-                else if (cls === 'D1') mao = 1.00 / h.expectedWinRate;
+            let cls = 'N';
+            const ev = h.calculatedEv;
+            const r = (h["評価"] || "").toUpperCase().trim();
+            const winRate = h.expectedWinRate;
+
+            if (h.usedOdds > 0) {
+                if (r === 'S' && ev < 0.700) cls = 'S0';
+                else if (r === 'S' && ev >= 0.700 && ev <= 0.999) cls = 'S1';
+                else if (r === 'S' && ev >= 1.200 && ev <= 1.499) cls = 'S2';
+                else if (r === 'B' && ev <= 0.500) cls = 'B0+';
+                else if (r === 'A' && ev < 0.600) cls = 'A0';
+                else if (r === 'B' && ev > 0.500 && ev <= 0.900) cls = 'B0';
+                else if (r === 'A' && ev >= 0.600 && ev <= 0.899) cls = 'A1';
+                else if (r === 'C' && winRate >= 0.05 && ev < 1.000) cls = 'C0';
+                else if (r === 'D' && ev >= 3.000 && ev <= 3.999) cls = 'X';
+                else if (r === 'B' && ev >= 1.500 && ev <= 1.999) cls = 'B2';
+                else if (r === 'B' && ev >= 1.100 && ev <= 1.350) cls = 'B1';
+                else if (r === 'B' && ev >= 2.000 && ev <= 4.500) cls = 'B3';
+                else if (r === 'A' && ev >= 1.000 && ev <= 1.250) cls = 'A2';
+                else if (r === 'D' && ev >= 1.300 && ev <= 1.999) cls = 'D1';
             }
-            h.calculatedMao = mao;
-            
+
+            let mao = 999;
+            if (winRate > 0) {
+                if (['S0','S1','S2','A0','B0+','A1','C0','B0'].includes(cls)) mao = 0.50 / winRate;
+                else if (['B1', 'B2', 'B3', 'A2'].includes(cls)) mao = 0.90 / winRate;
+                else if (cls === 'X') mao = 3.00 / winRate;
+                else if (cls === 'D1') mao = 1.00 / winRate;
+            }
+
             let amberPass = false;
             if (cls === 'X' || cls === 'D1') {
-                amberPass = odds >= mao;
-            } else {
-                amberPass = odds >= (mao * 1.2);
+                amberPass = h.usedOdds >= mao;
+            } else if (['S0','S1','S2','A0','B0+','A1','C0','B0','B1','B2','B3','A2'].includes(cls)) {
+                amberPass = h.usedOdds >= (mao * 1.2);
             }
             h.amberPass = amberPass;
+            
+            // 後続のシミュレーションがそのまま動くようにCSVの値を強制上書き
+            h["最終確定クラス"] = cls;
+            h["購入時クラス"] = cls;
+            h["最終確定期待値"] = h.calculatedEv;
+            h["購入時期待値"] = h.calculatedEv;
         });
+
         return horses;
     }
 
