@@ -343,86 +343,134 @@ document.addEventListener('DOMContentLoaded', () => {
         const classes = raceHorses.map(h => (h["最終確定クラス"] || h["購入時クラス"] || "").trim());
         const density = calculateSSDensity(raceHorses);
         
-        const hasAxis = classes.some(c => AXIS_CLASSES.includes(c));
+        // 優先順位の定数定義（念のため関数内に明記）
+        const PLACE_CORE_CLASSES = ['S0', 'S1', 'S2', 'A0', 'B0+', 'A1', 'C0'];
+        const WIN_CORE_CLASSES = ['X', 'B1', 'D1', 'B2', 'B3', 'A2'];
+        const WIN_PRIORITY_LOCAL = ['X', 'B1', 'D1', 'B2', 'B3', 'A2', 'B0+'];
+        const TRIO_ROW2_DEFENSE_LOCAL = ['S0', 'S1', 'S2', 'A0', 'A1', 'B0+'];
+        const TRIO_ROW2_ATTACK_LOCAL = ['B1', 'B2', 'X', 'D1', 'B3', 'A2'];
+
+        const hasAxis = classes.some(c => PLACE_CORE_CLASSES.includes(c));
         const isGraded = raceHorses[0] && ((raceHorses[0]["グレード・頭数"] || "").includes("G") || (raceHorses[0]["グレード・頭数"] || "").includes("重賞"));
         const minDensity = isGraded ? 0.100 : 0.150;
         const skipTrio = !hasAxis || density < minDensity;
 
-        let winCandidates = raceHorses.filter(h => h.amberPass && WIN_PRIORITY.includes((h["最終確定クラス"] || h["購入時クラス"] || "").trim()));
-        winCandidates.sort((a, b) => {
-            const clsA = (a["最終確定クラス"] || a["購入時クラス"] || "").trim();
-            const clsB = (b["最終確定クラス"] || b["購入時クラス"] || "").trim();
-            const pA = WIN_PRIORITY.indexOf(clsA);
-            const pB = WIN_PRIORITY.indexOf(clsB);
-            if (pA !== pB) return pA - pB;
-            const evA = parseFloat(a["最終確定期待値"]) || 0;
-            const evB = parseFloat(b["最終確定期待値"]) || 0;
-            if (Math.abs(evA - evB) <= 0.100) return parseInt(b["馬番"]) - parseInt(a["馬番"]);
-            return evA - evB; 
-        });
+        // 【攻撃ソート関数】EV差が0.100以内なら馬番大を優先、それ以外はEV低を優先
+        const attackSort = (a, b) => {
+            const evA = parseFloat(a["最終確定期待値"]) || parseFloat(a["購入時期待値"]) || 0;
+            const evB = parseFloat(b["最終確定期待値"]) || parseFloat(b["購入時期待値"]) || 0;
+            const umA = parseInt(a["馬番"]);
+            const umB = parseInt(b["馬番"]);
+            
+            if (Math.abs(evA - evB) <= 0.100 + 1e-9) {
+                return umB - umA; // 馬番が大きい方(B-Aが正ならBを前に)
+            } else {
+                return evA - evB; // EVが低い方(A-Bが正ならAを後ろに)
+            }
+        };
 
+        // 【単勝シミュレーション馬選定】
         let finalWinBets = [];
-        for (let h of winCandidates) {
+        let amberPassedHorses = raceHorses.filter(h => h.amberPass);
+        
+        for (let clsName of WIN_PRIORITY_LOCAL) {
             if (finalWinBets.length >= 2) break;
-            const umaban = parseInt(h["馬番"]);
-            const cls = (h["最終確定クラス"] || h["購入時クラス"] || "").trim();
-            if (umaban >= 13 && ['A1', 'S2', 'A0'].includes(cls)) continue;
-            finalWinBets.push(h);
+            
+            let cands = amberPassedHorses.filter(h => (h["最終確定クラス"] || h["購入時クラス"] || "").trim() === clsName);
+            if (cands.length > 0) {
+                cands.sort(attackSort); // 攻撃ソート適用
+                
+                for (let h of cands) {
+                    if (finalWinBets.length >= 2) break;
+                    const umaban = parseInt(h["馬番"]);
+                    // 壁フィルター
+                    if (umaban >= 13 && ['A1', 'S2', 'A0'].includes(clsName)) continue;
+                    finalWinBets.push(h);
+                }
+            }
         }
 
+        // 【三連複シミュレーション買い目選定】
         let finalTrioCombos = [];
         if (!skipTrio) {
-            let axisCandidates = raceHorses.filter(h => AXIS_CLASSES.includes((h["最終確定クラス"] || h["購入時クラス"] || "").trim()));
-            axisCandidates.sort((a, b) => {
-                const pA = AXIS_CLASSES.indexOf((a["最終確定クラス"] || a["購入時クラス"] || "").trim());
-                const pB = AXIS_CLASSES.indexOf((b["最終確定クラス"] || b["購入時クラス"] || "").trim());
-                if (pA !== pB) return pA - pB;
-                return parseInt(a["馬番"]) - parseInt(b["馬番"]);
-            });
-            let axisHorse = axisCandidates.length > 0 ? axisCandidates[0] : null;
+            let axisHorse = null;
+            // 軸の選定（優先順位順に探し、同クラスなら内枠優先）
+            for (let c of PLACE_CORE_CLASSES) {
+                let cands = raceHorses.filter(h => (h["最終確定クラス"] || h["購入時クラス"] || "").trim() === c);
+                if (cands.length > 0) {
+                    cands.sort((a, b) => parseInt(a["馬番"]) - parseInt(b["馬番"])); // 防御ソート（内枠優先）
+                    axisHorse = cands[0];
+                    break;
+                }
+            }
 
             if (axisHorse) {
-                let row2Defense = raceHorses.filter(h => h !== axisHorse && TRIO_ROW2_DEFENSE.includes((h["最終確定クラス"] || h["購入時クラス"] || "").trim()));
-                row2Defense.sort((a, b) => {
-                    const pA = TRIO_ROW2_DEFENSE.indexOf((a["最終確定クラス"] || a["購入時クラス"] || "").trim());
-                    const pB = TRIO_ROW2_DEFENSE.indexOf((b["最終確定クラス"] || b["購入時クラス"] || "").trim());
-                    if (pA !== pB) return pA - pB;
-                    return parseInt(a["馬番"]) - parseInt(b["馬番"]);
-                });
-                row2Defense = row2Defense.slice(0, 2);
-
-                let row2Attack = raceHorses.filter(h => h !== axisHorse && TRIO_ROW2_ATTACK.includes((h["最終確定クラス"] || h["購入時クラス"] || "").trim()));
-                row2Attack.sort((a, b) => {
-                    const pA = TRIO_ROW2_ATTACK.indexOf((a["最終確定クラス"] || a["購入時クラス"] || "").trim());
-                    const pB = TRIO_ROW2_ATTACK.indexOf((b["最終確定クラス"] || b["購入時クラス"] || "").trim());
-                    if (pA !== pB) return pA - pB;
-                    const evA = parseFloat(a["最終確定期待値"]) || 0;
-                    const evB = parseFloat(b["最終確定期待値"]) || 0;
-                    if (Math.abs(evA - evB) <= 0.100) return parseInt(b["馬番"]) - parseInt(a["馬番"]);
-                    return evA - evB;
-                });
-                row2Attack = row2Attack.slice(0, 1);
-
-                let row2 = [...row2Defense, ...row2Attack];
-                let row3 = new Set([...row2]);
+                let row2 = [];
                 
-                raceHorses.filter(h => (h["評価"] || "").toUpperCase().trim() === 'S').forEach(h => row3.add(h));
-                raceHorses.filter(h => TRIO_ROW2_ATTACK.includes((h["最終確定クラス"] || h["購入時クラス"] || "").trim())).forEach(h => row3.add(h));
-                
-                let c0 = raceHorses.filter(h => (h["最終確定クラス"] || h["購入時クラス"] || "").trim() === 'C0');
-                c0.sort((a, b) => parseInt(a["馬番"]) - parseInt(b["馬番"]));
-                c0.forEach(h => row3.add(h));
+                // 2列目防衛 (優先順位順に最大2枚)
+                let defCount = 0;
+                for (let c of TRIO_ROW2_DEFENSE_LOCAL) {
+                    if (defCount >= 2) break;
+                    let cands = raceHorses.filter(h => h !== axisHorse && (h["最終確定クラス"] || h["購入時クラス"] || "").trim() === c);
+                    if (cands.length > 0) {
+                        cands.sort((a, b) => parseInt(a["馬番"]) - parseInt(b["馬番"])); // 防御ソート
+                        for (let h of cands) {
+                            if (defCount >= 2) break;
+                            if (!row2.includes(h)) {
+                                row2.push(h);
+                                defCount++;
+                            }
+                        }
+                    }
+                }
 
-                let nClasses = raceHorses.filter(h => (h["最終確定クラス"] || h["購入時クラス"] || "").trim() === 'N' || (h["最終確定クラス"] || h["購入時クラス"] || "").trim() === '');
-                nClasses.sort((a, b) => {
+                // 2列目攻撃 (優先順位順に最大1枚)
+                let atkCount = 0;
+                for (let c of TRIO_ROW2_ATTACK_LOCAL) {
+                    if (atkCount >= 1) break;
+                    let cands = raceHorses.filter(h => h !== axisHorse && (h["最終確定クラス"] || h["購入時クラス"] || "").trim() === c);
+                    if (cands.length > 0) {
+                        cands.sort(attackSort); // 攻撃ソート
+                        for (let h of cands) {
+                            if (atkCount >= 1) break;
+                            if (!row2.includes(h)) {
+                                row2.push(h);
+                                atkCount++;
+                            }
+                        }
+                    }
+                }
+
+                // 3列目 (網) の構築
+                let row3 = [];
+                
+                // 1. 2列目の全馬
+                row2.forEach(h => { if (!row3.includes(h)) row3.push(h); });
+                
+                // 2. 評価Sの全馬
+                raceHorses.filter(h => h !== axisHorse && (h["評価"] || "").toUpperCase().trim() === 'S')
+                          .forEach(h => { if (!row3.includes(h)) row3.push(h); });
+                          
+                // 3. Win-Core系の全馬
+                raceHorses.filter(h => h !== axisHorse && WIN_CORE_CLASSES.includes((h["最終確定クラス"] || h["購入時クラス"] || "").trim()))
+                          .forEach(h => { if (!row3.includes(h)) row3.push(h); });
+
+                // 4. C0クラスの馬 (内枠優先)
+                let c0Cands = raceHorses.filter(h => h !== axisHorse && (h["最終確定クラス"] || h["購入時クラス"] || "").trim() === 'C0');
+                c0Cands.sort((a, b) => parseInt(a["馬番"]) - parseInt(b["馬番"]));
+                c0Cands.forEach(h => { if (!row3.includes(h)) row3.push(h); });
+
+                // 5. Nクラスの馬 (勝率降順 → 馬番降順)
+                let nCands = raceHorses.filter(h => h !== axisHorse && ['N', ''].includes((h["最終確定クラス"] || h["購入時クラス"] || "").trim()));
+                nCands.sort((a, b) => {
                     if (a.expectedWinRate !== b.expectedWinRate) return b.expectedWinRate - a.expectedWinRate;
                     return parseInt(b["馬番"]) - parseInt(a["馬番"]);
                 });
-                nClasses.forEach(h => row3.add(h));
+                nCands.forEach(h => { if (!row3.includes(h)) row3.push(h); });
 
-                row3.delete(axisHorse);
-                let row3Array = Array.from(row3).slice(0, 10);
+                let row3Array = row3.slice(0, 10); // 最大10頭
 
+                // 組み合わせの生成
                 row2.forEach(h2 => {
                     row3Array.forEach(h3 => {
                         if (h2 !== h3 && h2 !== axisHorse && h3 !== axisHorse) {
