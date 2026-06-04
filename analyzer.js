@@ -514,14 +514,33 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
+        // --- Legacy自己検算: 日付が"Legacy"のレースは単勝払戻をオッズから再計算 ---
+        const isLegacyRace = raceHorses[0] && (raceHorses[0]["日付"] || "").trim() === "Legacy";
+
         let actualWinPayoutMap = {};
         let actualTrioPayout = 0;
-        raceHorses.forEach(h => {
-            const wVal = parseFloat(h["単勝払戻"]);
-            if (!isNaN(wVal) && wVal > 0) actualWinPayoutMap[h["馬番"]] = wVal;
-            const tVal = parseFloat(h["三連複払戻"]);
-            if (!isNaN(tVal) && tVal > 0) actualTrioPayout = tVal;
-        });
+
+        if (isLegacyRace) {
+            // Legacy期: 1着馬のオッズから単勝払戻を自己検算
+            raceHorses.forEach(h => {
+                if (parseInt(h["着順"]) === 1) {
+                    const odds = parseFloat(h["最終確定オッズ"]) || parseFloat(h["購入時オッズ"]) || 0;
+                    if (odds > 0) {
+                        actualWinPayoutMap[h["馬番"]] = Math.floor(odds * 100);
+                    }
+                }
+                const tVal = parseFloat(h["三連複払戻"]);
+                if (!isNaN(tVal) && tVal > 0) actualTrioPayout = tVal;
+            });
+        } else {
+            // 通常期: CSVから読み取った払戻金をそのまま使用
+            raceHorses.forEach(h => {
+                const wVal = parseFloat(h["単勝払戻"]);
+                if (!isNaN(wVal) && wVal > 0) actualWinPayoutMap[h["馬番"]] = wVal;
+                const tVal = parseFloat(h["三連複払戻"]);
+                if (!isNaN(tVal) && tVal > 0) actualTrioPayout = tVal;
+            });
+        }
 
         let winReturn = 0;
         finalWinBets.forEach(h => {
@@ -537,25 +556,32 @@ document.addEventListener('DOMContentLoaded', () => {
 
         let trioReturn = 0;
         let trioHit = false;
-        const winners = raceHorses.filter(h => parseInt(h["着順"]) <= 3).map(h => parseInt(h["馬番"])).sort((a,b) => a-b);
-        if (winners.length >= 3) {
-            const getCombinations = (arr, k) => {
-                let result = [];
-                const f = (prefix, arr) => {
-                    if (prefix.length === k) { result.push(prefix); return; }
-                    for (let i = 0; i < arr.length; i++) f([...prefix, arr[i]], arr.slice(i + 1));
+
+        if (isLegacyRace) {
+            // Legacy期: 三連複払戻データが破損しているため、三連複シミュレーションを完全除外
+            // trioReturn = 0, trioInvest = 0 として扱う
+        } else {
+            // 通常期: 三連複の的中判定と払戻集計
+            const winners = raceHorses.filter(h => parseInt(h["着順"]) <= 3).map(h => parseInt(h["馬番"])).sort((a,b) => a-b);
+            if (winners.length >= 3) {
+                const getCombinations = (arr, k) => {
+                    let result = [];
+                    const f = (prefix, arr) => {
+                        if (prefix.length === k) { result.push(prefix); return; }
+                        for (let i = 0; i < arr.length; i++) f([...prefix, arr[i]], arr.slice(i + 1));
+                    };
+                    f([], arr);
+                    return result;
                 };
-                f([], arr);
-                return result;
-            };
-            const combos = getCombinations(winners, 3);
-            for (let c of combos) {
-                if (finalTrioCombos.includes(c.join('-'))) {
-                    trioHit = true;
-                    break;
+                const combos = getCombinations(winners, 3);
+                for (let c of combos) {
+                    if (finalTrioCombos.includes(c.join('-'))) {
+                        trioHit = true;
+                        break;
+                    }
                 }
+                if (trioHit) trioReturn = actualTrioPayout;
             }
-            if (trioHit) trioReturn = actualTrioPayout;
         }
 
         return {
@@ -564,7 +590,7 @@ document.addEventListener('DOMContentLoaded', () => {
             rec: determineRecommendation(raceHorses),
             winInvest: finalWinBets.length * 100,
             winReturn: winReturn,
-            trioInvest: finalTrioCombos.length * 100,
+            trioInvest: isLegacyRace ? 0 : finalTrioCombos.length * 100,
             trioReturn: trioReturn
         };
     }
