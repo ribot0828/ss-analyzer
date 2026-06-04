@@ -269,7 +269,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const AXIS_CLASSES = ['S0', 'S1', 'S2', 'A0', 'B0+', 'A1', 'C0'];
     const WIN_PRIORITY = ['A2', 'B1', 'B3', 'B2', 'D1', 'X', 'B0+'];
     const TRIO_ROW2_DEFENSE = ['S0', 'S1', 'S2', 'A0', 'A1', 'B0+'];
-    const TRIO_ROW2_ATTACK = ['B1', 'B2', 'X', 'D1', 'B3', 'A2'];
+    const TRIO_ROW2_ATTACK = ['A2', 'B1', 'B3', 'B2', 'D1', 'X'];
 
     function enrichHorses(horses) {
         let totalScore = 0;
@@ -380,7 +380,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const WIN_CORE_CLASSES = ['X', 'B1', 'D1', 'B2', 'B3', 'A2'];
         const WIN_PRIORITY_LOCAL = ['A2', 'B1', 'B3', 'B2', 'D1', 'X', 'B0+'];
         const TRIO_ROW2_DEFENSE_LOCAL = ['S0', 'S1', 'S2', 'A0', 'A1', 'B0+'];
-        const TRIO_ROW2_ATTACK_LOCAL = ['B1', 'B2', 'X', 'D1', 'B3', 'A2'];
+        const TRIO_ROW2_ATTACK_LOCAL = ['A2', 'B1', 'B3', 'B2', 'D1', 'X'];
 
         const hasAxis = classes.some(c => PLACE_CORE_CLASSES.includes(c));
         const isGraded = raceHorses[0] && ((raceHorses[0]["グレード・頭数"] || "").includes("G") || (raceHorses[0]["グレード・頭数"] || "").includes("重賞"));
