@@ -679,18 +679,30 @@ document.addEventListener('DOMContentLoaded', () => {
         return order.map(rec => {
             const races = simulatedRaces.filter(r => r.rec === rec);
             const raceCount = races.length;
-            if (raceCount === 0) return { rec, raceCount: 0, winInvest: 0, winROI: 0, trioInvest: 0, trioROI: 0, totalInvest: 0, totalROI: 0 };
+            if (raceCount === 0) return { rec, raceCount: 0, winInvest: 0, winROI: 0, winHits: 0, winBetRaces: 0, trioInvest: 0, trioROI: 0, trioHits: 0, trioBetRaces: 0, totalInvest: 0, totalROI: 0 };
 
             let winInvest = 0;
             let winReturn = 0;
             let trioInvest = 0;
             let trioReturn = 0;
+            let winHits = 0;
+            let winBetRaces = 0;
+            let trioHits = 0;
+            let trioBetRaces = 0;
 
             races.forEach(r => {
                 winInvest += r.winInvest;
                 winReturn += r.winReturn;
                 trioInvest += r.trioInvest;
                 trioReturn += r.trioReturn;
+                if (r.winInvest > 0) {
+                    winBetRaces++;
+                    if (r.winReturn > 0) winHits++;
+                }
+                if (r.trioInvest > 0) {
+                    trioBetRaces++;
+                    if (r.trioReturn > 0) trioHits++;
+                }
             });
 
             const winROI = winInvest > 0 ? (winReturn / winInvest) * 100 : 0;
@@ -698,12 +710,13 @@ document.addEventListener('DOMContentLoaded', () => {
             const totalInvest = winInvest + trioInvest;
             const totalROI = totalInvest > 0 ? ((winReturn + trioReturn) / totalInvest) * 100 : 0;
 
-            return { rec, raceCount, winInvest, winROI, trioInvest, trioROI, totalInvest, totalROI };
+            return { rec, raceCount, winInvest, winROI, winHits, winBetRaces, trioInvest, trioROI, trioHits, trioBetRaces, totalInvest, totalROI };
         }).filter(s => s.raceCount > 0);
     }
 
     function renderRecommendationTable(stats) {
         const recColors = { 'SSS': 'text-yellow-300', 'SS': 'text-orange-400', 'S': 'text-blue-400', 'Low': 'text-slate-400' };
+        const fmtHitRate = (hits, total) => total > 0 ? `${(hits / total * 100).toFixed(1)}% (${hits}/${total})` : '-';
         let html = `
             <div class="overflow-x-auto">
                 <table class="analysis-table w-full text-sm">
@@ -712,8 +725,10 @@ document.addEventListener('DOMContentLoaded', () => {
                             <th>推奨度</th>
                             <th>レース数</th>
                             <th>単勝投資</th>
+                            <th>単勝的中率</th>
                             <th>単勝回収率</th>
                             <th>三連複投資</th>
+                            <th>三連複的中率</th>
                             <th>三連複回収率</th>
                             <th>合算投資額</th>
                             <th>合算回収率</th>
@@ -725,8 +740,10 @@ document.addEventListener('DOMContentLoaded', () => {
                                 <td class="font-bold ${recColors[s.rec] || ''}">${s.rec}</td>
                                 <td>${s.raceCount}</td>
                                 <td>${s.winInvest.toLocaleString()}円</td>
+                                <td>${fmtHitRate(s.winHits, s.winBetRaces)}</td>
                                 <td class="${s.winROI >= 100 ? 'text-green-400 font-bold' : ''}">${s.winROI.toFixed(1)}%</td>
                                 <td>${s.trioInvest.toLocaleString()}円</td>
+                                <td>${fmtHitRate(s.trioHits, s.trioBetRaces)}</td>
                                 <td class="${s.trioROI >= 100 ? 'text-green-400 font-bold' : ''}">${s.trioROI.toFixed(1)}%</td>
                                 <td>${s.totalInvest.toLocaleString()}円</td>
                                 <td class="${s.totalROI >= 100 ? 'text-green-400 font-bold' : ''}">${s.totalROI.toFixed(1)}%</td>
@@ -1027,11 +1044,12 @@ document.addEventListener('DOMContentLoaded', () => {
         md += `
 ## 3. 推奨度別パフォーマンス（シミュレーション: SSS/SS/S/Low）
 `;
-        md += `| 推奨度 | レース数 | 単勝投資 | 単勝回収率 | 三連複投資 | 三連複回収率 | 合算投資 | 合算回収率 |
-|---|---|---|---|---|---|---|---|
+        const fmtHitRateMd = (hits, total) => total > 0 ? `${(hits / total * 100).toFixed(1)}% (${hits}/${total})` : '-';
+        md += `| 推奨度 | レース数 | 単勝投資 | 単勝的中率 | 単勝回収率 | 三連複投資 | 三連複的中率 | 三連複回収率 | 合算投資 | 合算回収率 |
+|---|---|---|---|---|---|---|---|---|---|
 `;
         recStats.forEach(s => {
-            md += `| ${s.rec} | ${s.raceCount} | ${s.winInvest.toLocaleString()}円 | ${s.winROI.toFixed(1)}% | ${s.trioInvest.toLocaleString()}円 | ${s.trioROI.toFixed(1)}% | ${s.totalInvest.toLocaleString()}円 | ${s.totalROI.toFixed(1)}% |
+            md += `| ${s.rec} | ${s.raceCount} | ${s.winInvest.toLocaleString()}円 | ${fmtHitRateMd(s.winHits, s.winBetRaces)} | ${s.winROI.toFixed(1)}% | ${s.trioInvest.toLocaleString()}円 | ${fmtHitRateMd(s.trioHits, s.trioBetRaces)} | ${s.trioROI.toFixed(1)}% | ${s.totalInvest.toLocaleString()}円 | ${s.totalROI.toFixed(1)}% |
 `;
         });
 
