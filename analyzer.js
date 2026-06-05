@@ -475,30 +475,43 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 // 3列目 (網) の構築
                 let row3 = [];
-                
-                // 1. 2列目の全馬
-                row2.forEach(h => { if (!row3.includes(h)) row3.push(h); });
-                
-                // 2. 評価Sの全馬
-                raceHorses.filter(h => h !== axisHorse && (h["評価"] || "").toUpperCase().trim() === 'S')
-                          .forEach(h => { if (!row3.includes(h)) row3.push(h); });
-                          
-                // 3. Win-Core系の全馬
-                raceHorses.filter(h => h !== axisHorse && WIN_CORE_CLASSES.includes((h["最終確定クラス"] || h["購入時クラス"] || "").trim()))
-                          .forEach(h => { if (!row3.includes(h)) row3.push(h); });
 
-                // 4. C0クラスの馬 (内枠優先)
-                let c0Cands = raceHorses.filter(h => h !== axisHorse && (h["最終確定クラス"] || h["購入時クラス"] || "").trim() === 'C0');
-                c0Cands.sort((a, b) => parseInt(a["馬番"]) - parseInt(b["馬番"]));
-                c0Cands.forEach(h => { if (!row3.includes(h)) row3.push(h); });
-
-                // 5. Nクラスの馬 (勝率降順 → 馬番降順)
-                let nCands = raceHorses.filter(h => h !== axisHorse && ['N', ''].includes((h["最終確定クラス"] || h["購入時クラス"] || "").trim()));
-                nCands.sort((a, b) => {
+                // ソート関数定義
+                const sortDefense = (a, b) => parseInt(a["馬番"]) - parseInt(b["馬番"]); // 内枠優先
+                const sortN = (a, b) => {
                     if (a.expectedWinRate !== b.expectedWinRate) return b.expectedWinRate - a.expectedWinRate;
                     return parseInt(b["馬番"]) - parseInt(a["馬番"]);
-                });
-                nCands.forEach(h => { if (!row3.includes(h)) row3.push(h); });
+                };
+                const addToRow3 = (list) => { list.forEach(h => { if (!row3.includes(h)) row3.push(h); }); };
+                
+                // 1. 2列目の全馬（ソート不要、そのまま追加）
+                addToRow3(row2);
+                
+                // 2. 評価Sの全馬（sortDefense適用）
+                let sCands = raceHorses.filter(h => h !== axisHorse && (h["評価"] || "").toUpperCase().trim() === 'S');
+                sCands.sort(sortDefense);
+                addToRow3(sCands);
+                
+                // 3. 防御系クラスの残り馬（A0, B0+, A1, B0）（sortDefense適用）
+                const DEFENSE_REMAINING = ['A0', 'B0+', 'A1', 'B0'];
+                let defRemCands = raceHorses.filter(h => h !== axisHorse && DEFENSE_REMAINING.includes((h["最終確定クラス"] || h["購入時クラス"] || "").trim()));
+                defRemCands.sort(sortDefense);
+                addToRow3(defRemCands);
+                
+                // 4. 攻撃枠（TRIO_ROW2_ATTACK_LOCAL のクラス）の全馬（sortAttack = attackSort適用）
+                let atkCands = raceHorses.filter(h => h !== axisHorse && TRIO_ROW2_ATTACK_LOCAL.includes((h["最終確定クラス"] || h["購入時クラス"] || "").trim()));
+                atkCands.sort(attackSort);
+                addToRow3(atkCands);
+
+                // 5. C0クラスの馬（sortDefense適用）
+                let c0Cands = raceHorses.filter(h => h !== axisHorse && (h["最終確定クラス"] || h["購入時クラス"] || "").trim() === 'C0');
+                c0Cands.sort(sortDefense);
+                addToRow3(c0Cands);
+
+                // 6. 残りのNクラスの馬（sortN適用）
+                let nCands = raceHorses.filter(h => h !== axisHorse && ['N', ''].includes((h["最終確定クラス"] || h["購入時クラス"] || "").trim()));
+                nCands.sort(sortN);
+                addToRow3(nCands);
 
                 let row3Array = row3.slice(0, 10); // 最大10頭
 
