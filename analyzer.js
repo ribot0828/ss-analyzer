@@ -683,6 +683,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const rows = groups[cls];
             const sample = rows.length;
             const wins = rows.filter(r => parseInt(r["着順"]) === 1).length;
+            const top2 = rows.filter(r => parseInt(r["着順"]) <= 2).length;
             const top3 = rows.filter(r => parseInt(r["着順"]) <= 3).length;
             const returns = rows.reduce((acc, r) => acc + (parseInt(r["着順"]) === 1 ? (parseFloat(r["最終確定オッズ"]) * 100) : 0), 0);
             const oddsSum = rows.reduce((acc, r) => acc + (parseFloat(r["最終確定オッズ"]) || 0), 0);
@@ -693,9 +694,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const kelly = calculateKelly(winRate, avgOdds);
 
             return {
-                cls, sample, 
+                cls, sample, wins,
                 winRate, 
-                top3Rate: (top3 / sample) * 100, 
+                top2, top2Rate: (top2 / sample) * 100,
+                top3, top3Rate: (top3 / sample) * 100, 
                 roi, 
                 avgEv: rows.reduce((acc, r) => acc + (parseFloat(r["最終確定期待値"]) || 0), 0) / sample,
                 kelly
@@ -843,6 +845,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             <th>クラス</th>
                             <th>頭数</th>
                             <th>的中率</th>
+                            <th>連対率</th>
                             <th>複勝率</th>
                             <th>回収率</th>
                             <th>平均EV</th>
@@ -854,8 +857,9 @@ document.addEventListener('DOMContentLoaded', () => {
                             <tr>
                                 <td class="font-bold">${s.sample >= 30 ? '✅' : '⚠️'} ${s.cls}</td>
                                 <td>${s.sample}</td>
-                                <td>${s.winRate.toFixed(1)}%</td>
-                                <td>${s.top3Rate.toFixed(1)}%</td>
+                                <td>${s.winRate.toFixed(1)}% (${s.wins}/${s.sample})</td>
+                                <td>${s.top2Rate.toFixed(1)}% (${s.top2}/${s.sample})</td>
+                                <td>${s.top3Rate.toFixed(1)}% (${s.top3}/${s.sample})</td>
                                 <td class="${s.roi >= 100 ? 'text-green-400 font-bold' : ''}">${s.roi.toFixed(1)}%</td>
                                 <td>${s.avgEv.toFixed(3)}</td>
                                 <td class="font-bold ${s.kelly > 5 ? 'text-orange-400' : ''}">${s.kelly.toFixed(1)}%</td>
@@ -1062,11 +1066,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
         md += `## 2. クラス別詳細レポート (Kelly推奨率)
 `;
-        md += `| クラス | サンプル | 的中率 | 複勝率 | 回収率 | EV | Kelly% |
-|---|---|---|---|---|---|---|
+        md += `| クラス | サンプル | 的中率 | 連対率 | 複勝率 | 回収率 | EV | Kelly% |
+|---|---|---|---|---|---|---|---|
 `;
         stats.forEach(s => {
-            md += `| ${s.cls} | ${s.sample} | ${s.winRate.toFixed(1)}% | ${s.top3Rate.toFixed(1)}% | ${s.roi.toFixed(1)}% | ${s.avgEv.toFixed(3)} | **${s.kelly.toFixed(1)}%** |
+            md += `| ${s.cls} | ${s.sample} | ${s.winRate.toFixed(1)}% (${s.wins}/${s.sample}) | ${s.top2Rate.toFixed(1)}% (${s.top2}/${s.sample}) | ${s.top3Rate.toFixed(1)}% (${s.top3}/${s.sample}) | ${s.roi.toFixed(1)}% | ${s.avgEv.toFixed(3)} | **${s.kelly.toFixed(1)}%** |
 `;
         });
 
