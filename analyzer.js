@@ -109,6 +109,17 @@ document.addEventListener('DOMContentLoaded', () => {
             const ctx = parseCourseDetail(normalizedRow["コース詳細"]);
             Object.assign(normalizedRow, ctx);
 
+            // 近走監査の読み取りとauditStatus付与
+            const auditRaw = (normalizedRow["近走監査"] || "").trim();
+            if (auditRaw === "✕") {
+                normalizedRow.auditStatus = 'NG';
+            } else if (auditRaw === "〇") {
+                normalizedRow.auditStatus = 'OK';
+            } else {
+                // 列なし・空欄・"-" → X/D1はOK扱い（後方互換性）
+                normalizedRow.auditStatus = 'OK';
+            }
+
             const raceId = getRaceId(normalizedRow);
             const uniqueKey = `${raceId}_${normalizedRow["馬番"]}`;
             allData.set(uniqueKey, normalizedRow);
@@ -140,6 +151,7 @@ document.addEventListener('DOMContentLoaded', () => {
         mapped["単勝払戻"] = row["単勝払戻"] || "";
         mapped["ワイド払戻"] = row["ワイド払戻"] || "";
         mapped["三連複払戻"] = row["三連複払戻"] || "";
+        mapped["近走監査"] = ""; // Legacy: 監査列なし → processRowsでOK扱いになる
         return mapped;
     }
 
@@ -658,7 +670,11 @@ document.addEventListener('DOMContentLoaded', () => {
     function calculateClassStats(data) {
         const groups = {};
         data.forEach(r => {
-            const cls = r["最終確定クラス"] || r["購入時クラス"] || "不明";
+            let cls = r["最終確定クラス"] || r["購入時クラス"] || "不明";
+            // X/D1で監査NGの場合、集計キーを分離
+            if ((cls === 'X' || cls === 'D1') && r.auditStatus === 'NG') {
+                cls = cls + '(NG)';
+            }
             if (!groups[cls]) groups[cls] = [];
             groups[cls].push(r);
         });
