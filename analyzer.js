@@ -284,11 +284,11 @@ document.addEventListener('DOMContentLoaded', () => {
             const outliers = detectOutliers(rowsWithRank);
             renderOutliers(outliers);
 
-            const md = generateUltimateMarkdown(riskStats, classStats, recStats, outliers);
+            const md = generateUltimateMarkdown(riskStats, classStats, recStats, outliers, simulatedRaces);
             geminiOutput.value = md;
 
             // JSONエクスポートデータの保持
-            window.latestSimData = { rowsWithRank, riskStats, classStats, amberStats };
+            window.latestSimData = { rowsWithRank, riskStats, classStats, amberStats, recStats };
 
             const jsonBtn = document.getElementById('downloadJsonBtn');
             if (jsonBtn) jsonBtn.classList.remove('hidden');
@@ -471,8 +471,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // 【三連複シミュレーション買い目選定】
         let finalTrioCombos = [];
+        let axisHorse = null;
+        let row2 = [];
+        let row3 = [];
+        let row3Array = [];
+
         if (!skipTrio) {
-            let axisHorse = null;
             // 軸の選定（優先順位順に探し、同クラスなら内枠優先）
             for (let c of PLACE_CORE_CLASSES) {
                 let cands = raceHorses.filter(h => (h["最終確定クラス"] || h["購入時クラス"] || "").trim() === c);
@@ -484,8 +488,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             if (axisHorse) {
-                let row2 = [];
-                
                 // 2列目防衛 (優先順位順に最大2枚)
                 let defCount = 0;
                 for (let c of TRIO_ROW2_DEFENSE_LOCAL) {
@@ -521,8 +523,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
 
                 // 3列目 (網) の構築
-                let row3 = [];
-
                 // ソート関数定義
                 const sortDefense = (a, b) => parseInt(a["馬番"]) - parseInt(b["馬番"]); // 内枠優先
                 const sortN = (a, b) => {
@@ -560,7 +560,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 nCands.sort(sortN);
                 addToRow3(nCands);
 
-                let row3Array = row3.slice(0, 10); // 最大10頭
+                row3Array = row3.slice(0, 10); // 最大10頭
 
                 // 組み合わせの生成
                 row2.forEach(h2 => {
@@ -654,6 +654,13 @@ document.addEventListener('DOMContentLoaded', () => {
             id: raceId,
             horses: raceHorses,
             rec: determineRecommendation(raceHorses),
+            ssDensity: density,
+            skipTrio: skipTrio,
+            axisHorse: axisHorse,
+            row2: row2,
+            row3: row3Array,
+            finalWinBets: finalWinBets,
+            amberFailBets: amberFailBets,
             winInvest: finalWinBets.length * 100,
             winReturn: winReturn,
             amberFailInvest: amberFailBets.length * 100,
@@ -907,9 +914,30 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         
         try {
-            const { rowsWithRank, classStats, amberStats } = window.latestSimData;
+            const { rowsWithRank, classStats, amberStats, recStats } = window.latestSimData;
             const totalRaces = parseInt(document.getElementById('stat-race-count')?.textContent || '0') || 0;
             const overallRoi = parseFloat(document.getElementById('stat-overall-roi')?.textContent || '0') || 0;
+
+            // 推奨度別成績
+            const recommendationPerformance = {
+                "SSS": { sampleRaces: 0, hitRate: 0.0, recoveryRate: 0.0 },
+                "SS": { sampleRaces: 0, hitRate: 0.0, recoveryRate: 0.0 },
+                "S": { sampleRaces: 0, hitRate: 0.0, recoveryRate: 0.0 },
+                "Low": { sampleRaces: 0, hitRate: 0.0, recoveryRate: 0.0 }
+            };
+            
+            if (recStats && Array.isArray(recStats)) {
+                recStats.forEach(rs => {
+                    const rec = rs?.rec;
+                    if (rec && recommendationPerformance[rec]) {
+                        recommendationPerformance[rec] = {
+                            sampleRaces: rs?.raceCount || 0,
+                            hitRate: rs?.totalBetRaces > 0 ? (rs.totalHits / rs.totalBetRaces) * 100 : 0.0,
+                            recoveryRate: rs?.totalROI || 0.0
+                        };
+                    }
+                });
+            }
 
             // オッズ帯別分析 (X/D1)
             const oddsBinAnalysis = { "D1": [], "X": [] };
@@ -993,9 +1021,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 return {
                     cls: c?.cls || "",
+                    sampleSize: c?.sample || 0,
                     winRate: c?.winRate || 0,
                     rentaiRate: c?.top2Rate || 0,
                     placeRate: c?.top3Rate || 0,
+                    winRecoveryRate: c?.roi || 0,
                     topUmaban: gates.slice(0, 3).map(g => g.gate),
                     worstUmaban: gates.slice(-3).reverse().map(g => g.gate)
                 };
@@ -1009,6 +1039,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     totalRaces: totalRaces,
                     overallRecoveryRate: overallRoi
                 },
+                recommendationPerformance: recommendationPerformance,
                 amberAudit: {
                     passed: {
                         sampleSize: safeAmber0.races,
@@ -1659,7 +1690,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- Markdown Export ---
-    function generateUltimateMarkdown(risk, stats, recStats, outliers) {
+    function generateUltimateMarkdown(risk, stats, recStats, outliers, simulatedRaces) {
         let md = `# SS-Analyzer Ultimate 解析レポート
 
 `;
@@ -1725,7 +1756,47 @@ document.addEventListener('DOMContentLoaded', () => {
 `;
         md += `2. 異常値リストに共通する特徴（例：特定の会場での期待値暴落、あるいはMAOフィルターの漏れ）を特定してください。
 `;
-        md += `3. 最大ドローダウンを 10% 以下に抑えつつ、利益を最大化するための資金配分（ケリー基準の調整案）を提案してください。`;
+        md += `3. 最大ドローダウンを 10% 以下に抑えつつ、利益を最大化するための資金配分（ケリー基準の調整案）を提案してください。
+
+`;
+
+        md += `---
+### 🤖 システム連携用JSON（レース詳細データ）
+`;
+        
+        const raceJsonList = (simulatedRaces || []).map(r => {
+            const strikers = (r.finalWinBets || []).map(h => ({
+                umaban: parseInt(h["馬番"]),
+                cls: (h["最終確定クラス"] || h["購入時クラス"] || "").trim(),
+                ev: parseFloat(h["最終確定期待値"]) || parseFloat(h["購入時期待値"]) || 0,
+                amberPassed: h.amberPass || false,
+                auditPassed: h.auditStatus !== 'NG'
+            }));
+            
+            const allHorses = (r.horses || []).map(h => ({
+                umaban: parseInt(h["馬番"]),
+                score: parseFloat(h["総合スコア"]) || 0,
+                winRate: parseFloat(h["予想勝率"]) || 0,
+                ev: parseFloat(h["最終確定期待値"]) || parseFloat(h["購入時期待値"]) || 0,
+                cls: (h["最終確定クラス"] || h["購入時クラス"] || "").trim()
+            }));
+
+            return {
+                raceId: r.id,
+                raceInfo: {
+                    ssDensity: r.ssDensity || 0,
+                    recommendation: r.rec || "Low",
+                    skipJudgment: r.skipTrio ? "SKIP" : "EXECUTE"
+                },
+                strikers: strikers,
+                allHorses: allHorses
+            };
+        });
+
+        md += `\`\`\`json
+${JSON.stringify(raceJsonList, null, 2)}
+\`\`\`
+`;
 
         return md;
     }
