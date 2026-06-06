@@ -1049,12 +1049,16 @@ document.addEventListener('DOMContentLoaded', () => {
                     const um = parseInt(r?.["馬番"]);
                     if (isNaN(um)) return;
                     const odds = parseFloat(r?.["最終確定オッズ"]) || parseFloat(r?.["購入時オッズ"]) || 0;
-                    if (!gateStats[um]) gateStats[um] = { count: 0, win: 0, invest: 0, return: 0 };
+                    if (!gateStats[um]) gateStats[um] = { count: 0, win: 0, top3: 0, invest: 0, return: 0 };
                     gateStats[um].count++;
                     gateStats[um].invest += 100;
-                    if (parseInt(r?.["着順"]) === 1) {
+                    const rank = parseInt(r?.["着順"]);
+                    if (rank === 1) {
                         gateStats[um].win++;
                         gateStats[um].return += odds * 100;
+                    }
+                    if (rank <= 3) {
+                        gateStats[um].top3++;
                     }
                 });
 
@@ -1062,6 +1066,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     umaban: g,
                     samples: gateStats[g].count,
                     winRate: gateStats[g].count > 0 ? (gateStats[g].win / gateStats[g].count) * 100 : 0.0,
+                    placeRate: gateStats[g].count > 0 ? (gateStats[g].top3 / gateStats[g].count) * 100 : 0.0,
                     recoveryRate: gateStats[g].invest > 0 ? (gateStats[g].return / gateStats[g].invest) * 100 : 0.0
                 }));
 
@@ -1074,20 +1079,23 @@ document.addEventListener('DOMContentLoaded', () => {
                     { label: '3.0以上', min: 3.0, max: 999.0 }
                 ];
                 
-                const evStats = evBins.map(b => ({ label: b.label, count: 0, win: 0, invest: 0, return: 0 }));
+                const evStats = evBins.map(b => ({ label: b.label, count: 0, win: 0, top3: 0, invest: 0, return: 0 }));
 
                 clsRows.forEach(r => {
                     const ev = parseFloat(r?.["最終確定期待値"]) || parseFloat(r?.["購入時期待値"]) || 0;
                     const odds = parseFloat(r?.["最終確定オッズ"]) || parseFloat(r?.["購入時オッズ"]) || 0;
-                    const isHit = parseInt(r?.["着順"]) === 1;
+                    const rank = parseInt(r?.["着順"]);
 
                     const binIdx = evBins.findIndex(b => ev >= b.min && ev < b.max);
                     if (binIdx !== -1) {
                         evStats[binIdx].count++;
                         evStats[binIdx].invest += 100;
-                        if (isHit) {
+                        if (rank === 1) {
                             evStats[binIdx].win++;
                             evStats[binIdx].return += odds * 100;
+                        }
+                        if (rank <= 3) {
+                            evStats[binIdx].top3++;
                         }
                     }
                 });
@@ -1096,6 +1104,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     evBin: s.label,
                     samples: s.count,
                     winRate: s.count > 0 ? (s.win / s.count) * 100 : 0.0,
+                    placeRate: s.count > 0 ? (s.top3 / s.count) * 100 : 0.0,
                     recoveryRate: s.invest > 0 ? (s.return / s.invest) * 100 : 0.0
                 }));
 
@@ -1465,26 +1474,31 @@ document.addEventListener('DOMContentLoaded', () => {
             { label: '3.0以上', min: 3.0, max: 999.0 }
         ];
         
-        const evStats = evBins.map(b => ({ label: b.label, count: 0, win: 0, invest: 0, return: 0 }));
+        const evStats = evBins.map(b => ({ label: b.label, count: 0, win: 0, top3: 0, invest: 0, return: 0 }));
 
         clsData.forEach(r => {
             const ev = parseFloat(r["最終確定期待値"]) || parseFloat(r["購入時期待値"]) || 0;
             const odds = parseFloat(r["最終確定オッズ"]) || parseFloat(r["購入時オッズ"]) || 0;
-            const isHit = parseInt(r["着順"]) === 1;
+            const rank = parseInt(r["着順"]);
 
             const binIdx = evBins.findIndex(b => ev >= b.min && ev < b.max);
             if (binIdx !== -1) {
                 evStats[binIdx].count++;
                 evStats[binIdx].invest += 100;
-                if (isHit) {
+                if (rank === 1) {
                     evStats[binIdx].win++;
                     evStats[binIdx].return += odds * 100;
+                }
+                if (rank <= 3) {
+                    evStats[binIdx].top3++;
                 }
             }
         });
 
         const evLabels = evStats.map(s => s.label);
         const evCounts = evStats.map(s => s.count);
+        const evWinRates = evStats.map(s => s.count > 0 ? (s.win / s.count) * 100 : 0);
+        const evPlaceRates = evStats.map(s => s.count > 0 ? (s.top3 / s.count) * 100 : 0);
         const evRecoveryRates = evStats.map(s => s.invest > 0 ? (s.return / s.invest) * 100 : 0);
 
         // モーダル表示
@@ -1608,6 +1622,32 @@ document.addEventListener('DOMContentLoaded', () => {
                         borderColor: 'rgba(148, 163, 184, 0.4)',
                         borderWidth: 1,
                         yAxisID: 'y1',
+                        order: 3
+                    },
+                    {
+                        type: 'line',
+                        label: '複勝率 (%)',
+                        data: evPlaceRates,
+                        borderColor: '#3b82f6',
+                        backgroundColor: 'rgba(59, 130, 246, 0.08)',
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 4,
+                        pointBackgroundColor: '#3b82f6',
+                        yAxisID: 'y',
+                        order: 0
+                    },
+                    {
+                        type: 'line',
+                        label: '勝率 (%)',
+                        data: evWinRates,
+                        borderColor: '#10b981',
+                        backgroundColor: 'rgba(16, 185, 129, 0.08)',
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 4,
+                        pointBackgroundColor: '#10b981',
+                        yAxisID: 'y',
                         order: 1
                     },
                     {
@@ -1621,7 +1661,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         pointRadius: 4,
                         pointBackgroundColor: '#f59e0b',
                         yAxisID: 'y',
-                        order: 0
+                        order: 2
                     }
                 ]
             },
