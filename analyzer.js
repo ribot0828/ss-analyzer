@@ -290,6 +290,9 @@ document.addEventListener('DOMContentLoaded', () => {
             // JSONエクスポートデータの保持
             window.latestSimData = { rowsWithRank, riskStats, classStats, amberStats };
 
+            const jsonBtn = document.getElementById('downloadJsonBtn');
+            if (jsonBtn) jsonBtn.classList.remove('hidden');
+
             const analysisTbl = document.querySelector('#analysisResultArea table');
             if (analysisTbl) makeTableSortable(analysisTbl);
 
