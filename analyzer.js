@@ -308,12 +308,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    const WIN_CORE_CLASSES = ['X', 'B1', 'D1', 'B2', 'B3', 'A2', 'B0+'];
-    const PLACE_CORE_CLASSES_FULL = ['S0', 'S1', 'S2', 'A0', 'B0+', 'A1', 'C0', 'B0'];
-    const AXIS_CLASSES = ['S0', 'S1', 'S2', 'A0', 'B0+', 'A1', 'C0'];
-    const WIN_PRIORITY = ['A2', 'B1', 'B3', 'B2', 'D1', 'X', 'B0+'];
-    const TRIO_ROW2_DEFENSE = ['S0', 'S1', 'S2', 'A0', 'A1', 'B0+'];
-    const TRIO_ROW2_ATTACK = ['B1', 'B2', 'X', 'D1', 'B3', 'A2'];
+    const WIN_CORE_CLASSES = ['X', 'B1', 'D1', 'B2', 'B3', 'A2', 'A3', 'B0+'];
+    const PLACE_CORE_CLASSES_FULL = ['S0', 'S1', 'S2', 'A0', 'B0+', 'A1', 'B0', 'C0'];
+    const AXIS_CLASSES = ['S0', 'S1', 'S2', 'A0', 'B0+', 'A1', 'B0', 'C0'];
+    const WIN_PRIORITY = ['A3', 'A2', 'B1', 'B3', 'B2', 'D1', 'X', 'B0+'];
+    const TRIO_ROW2_DEFENSE = ['S0', 'S1', 'S2', 'A0', 'B0+', 'A1', 'B0'];
+    const TRIO_ROW2_ATTACK = ['A3', 'B1', 'B2', 'X', 'D1', 'B3', 'A2'];
 
     function enrichHorses(horses) {
         let totalScore = 0;
@@ -362,13 +362,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 else if (r === 'B' && ev >= 1.100 && ev <= 1.350) cls = 'B1';
                 else if (r === 'B' && ev >= 2.000 && ev <= 4.500) cls = 'B3';
                 else if (r === 'A' && ev >= 1.000 && ev <= 1.250) cls = 'A2';
+                else if (r === 'A' && ev >= 1.500 && ev <= 1.999) cls = 'A3';
                 else if (r === 'D' && ev >= 1.300 && ev <= 1.999) cls = 'D1';
             }
 
             let mao = 999;
             if (winRate > 0) {
                 if (['S0','S1','S2','A0','B0+','A1','C0','B0'].includes(cls)) mao = 0.50 / winRate;
-                else if (['B1', 'B2', 'B3', 'A2'].includes(cls)) mao = 0.90 / winRate;
+                else if (['B1', 'B2', 'B3', 'A2', 'A3'].includes(cls)) mao = 0.90 / winRate;
                 else if (cls === 'X') mao = 3.00 / winRate;
                 else if (cls === 'D1') mao = 1.00 / winRate;
             }
@@ -376,7 +377,7 @@ document.addEventListener('DOMContentLoaded', () => {
             let amberPass = false;
             if (cls === 'X' || cls === 'D1') {
                 amberPass = h.usedOdds >= mao;
-            } else if (['S0','S1','S2','A0','B0+','A1','C0','B0','B1','B2','B3','A2'].includes(cls)) {
+            } else if (['S0','S1','S2','A0','B0+','A1','C0','B0','B1','B2','B3','A2', 'A3'].includes(cls)) {
                 amberPass = h.usedOdds >= (mao * 1.2);
             }
             h.amberPass = amberPass;
@@ -420,18 +421,18 @@ document.addEventListener('DOMContentLoaded', () => {
         const density = calculateSSDensity(raceHorses);
         
         // 優先順位の定数定義（念のため関数内に明記）
-        const PLACE_CORE_CLASSES = ['S0', 'S1', 'S2', 'A0', 'B0+', 'A1', 'C0'];
-        const WIN_CORE_CLASSES = ['X', 'B1', 'D1', 'B2', 'B3', 'A2'];
-        const WIN_PRIORITY_LOCAL = ['A2', 'B1', 'B3', 'B2', 'D1', 'X', 'B0+'];
-        const TRIO_ROW2_DEFENSE_LOCAL = ['S0', 'S1', 'S2', 'A0', 'A1', 'B0+'];
-        const TRIO_ROW2_ATTACK_LOCAL = ['B1', 'B2', 'X', 'D1', 'B3', 'A2'];
+        const PLACE_CORE_CLASSES = ['S0', 'S1', 'S2', 'A0', 'B0+', 'A1', 'B0', 'C0'];
+        const WIN_CORE_CLASSES = ['X', 'B1', 'D1', 'B2', 'B3', 'A2', 'A3'];
+        const WIN_PRIORITY_LOCAL = ['A3', 'A2', 'B1', 'B3', 'B2', 'D1', 'X', 'B0+'];
+        const TRIO_ROW2_DEFENSE_LOCAL = ['S0', 'S1', 'S2', 'A0', 'B0+', 'A1', 'B0'];
+        const TRIO_ROW2_ATTACK_LOCAL = ['A3', 'B1', 'B2', 'X', 'D1', 'B3', 'A2'];
 
         const hasAxis = classes.some(c => PLACE_CORE_CLASSES.includes(c));
         const isGraded = raceHorses[0] && ((raceHorses[0]["グレード・頭数"] || "").includes("G") || (raceHorses[0]["グレード・頭数"] || "").includes("重賞"));
         const minDensity = isGraded ? 0.100 : 0.150;
         const skipTrio = !hasAxis || density < minDensity;
 
-        // 【攻撃ソート関数】EV差が0.100以内なら馬番大を優先、それ以外はEV低を優先
+        // 【攻撃ソート関数】EV差が0.100以内なら馬番が小さい方（内枠）を優先、それ以外はEV低を優先
         const attackSort = (a, b) => {
             const evA = parseFloat(a["最終確定期待値"]) || parseFloat(a["購入時期待値"]) || 0;
             const evB = parseFloat(b["最終確定期待値"]) || parseFloat(b["購入時期待値"]) || 0;
@@ -439,10 +440,17 @@ document.addEventListener('DOMContentLoaded', () => {
             const umB = parseInt(b["馬番"]);
             
             if (Math.abs(evA - evB) <= 0.100 + 1e-9) {
-                return umB - umA; // 馬番が大きい方(B-Aが正ならBを前に)
+                return umA - umB; // 馬番が小さい方（内枠）を優先
             } else {
-                return evA - evB; // EVが低い方(A-Bが正ならAを後ろに)
+                return evA - evB; // EVが低い方を優先
             }
+        };
+
+        // 【防御ソート関数】スコアや枠順の比較は廃止し、純粋にEVが低い方を優先
+        const pureEvSort = (a, b) => {
+            const evA = parseFloat(a["最終確定期待値"]) || parseFloat(a["購入時期待値"]) || 0;
+            const evB = parseFloat(b["最終確定期待値"]) || parseFloat(b["購入時期待値"]) || 0;
+            return evA - evB;
         };
 
         // 【単勝シミュレーション馬選定とAmber検証用グループ分け】
@@ -480,11 +488,11 @@ document.addEventListener('DOMContentLoaded', () => {
         let row3Array = [];
 
         if (!skipTrio) {
-            // 軸の選定（優先順位順に探し、同クラスなら内枠優先）
+            // 軸の選定（優先順位順に探し、同クラスなら防御ソート=純粋EV）
             for (let c of PLACE_CORE_CLASSES) {
                 let cands = raceHorses.filter(h => (h["最終確定クラス"] || h["購入時クラス"] || "").trim() === c);
                 if (cands.length > 0) {
-                    cands.sort((a, b) => parseInt(a["馬番"]) - parseInt(b["馬番"])); // 防御ソート（内枠優先）
+                    cands.sort(pureEvSort); // 新防御ソート
                     axisHorse = cands[0];
                     break;
                 }
@@ -497,7 +505,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (defCount >= 2) break;
                     let cands = raceHorses.filter(h => h !== axisHorse && (h["最終確定クラス"] || h["購入時クラス"] || "").trim() === c);
                     if (cands.length > 0) {
-                        cands.sort((a, b) => parseInt(a["馬番"]) - parseInt(b["馬番"])); // 防御ソート
+                        cands.sort(pureEvSort); // 新防御ソート
                         for (let h of cands) {
                             if (defCount >= 2) break;
                             if (!row2.includes(h)) {
@@ -527,7 +535,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 // 3列目 (網) の構築
                 // ソート関数定義
-                const sortDefense = (a, b) => parseInt(a["馬番"]) - parseInt(b["馬番"]); // 内枠優先
+                const sortDefense = pureEvSort; // 新防御ソート
                 const sortN = (a, b) => {
                     if (a.expectedWinRate !== b.expectedWinRate) return b.expectedWinRate - a.expectedWinRate;
                     return parseInt(b["馬番"]) - parseInt(a["馬番"]);
