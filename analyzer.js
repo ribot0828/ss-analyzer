@@ -917,15 +917,21 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('amberReportArea').innerHTML = html;
     }
 
-    // --- 評価ランク用固定EV帯(Bin) ---
-    const RANK_EV_BINS = [
-        { label: "0.0〜0.4", min: 0.0, max: 0.5 },
-        { label: "0.5〜0.9", min: 0.5, max: 1.0 },
-        { label: "1.0〜1.4", min: 1.0, max: 1.5 },
-        { label: "1.5〜1.9", min: 1.5, max: 2.0 },
-        { label: "2.0〜2.9", min: 2.0, max: 3.0 },
-        { label: "3.0以上", min: 3.0, max: 999.0 }
-    ];
+    // --- 評価ランク用固定EV帯(Bin) 0.1刻み ---
+    const RANK_EV_BINS = (() => {
+        const bins = [];
+        for (let i = 0; i < 30; i++) {
+            const min = i / 10;
+            const max = (i + 1) / 10;
+            bins.push({
+                label: `${min.toFixed(1)}〜${(max - 0.01).toFixed(2)}`,
+                min: min,
+                max: max
+            });
+        }
+        bins.push({ label: "3.0以上", min: 3.0, max: 999.0 });
+        return bins;
+    })();
 
     // --- 動的EV帯(Bin)生成ヘルパー ---
     function generateDynamicEvBins(rows) {
