@@ -1065,6 +1065,40 @@ document.addEventListener('DOMContentLoaded', () => {
                     recoveryRate: gateStats[g].invest > 0 ? (gateStats[g].return / gateStats[g].invest) * 100 : 0.0
                 }));
 
+                const evBins = [
+                    { label: '0.0〜0.4', min: 0.0, max: 0.5 },
+                    { label: '0.5〜0.9', min: 0.5, max: 1.0 },
+                    { label: '1.0〜1.4', min: 1.0, max: 1.5 },
+                    { label: '1.5〜1.9', min: 1.5, max: 2.0 },
+                    { label: '2.0〜2.9', min: 2.0, max: 3.0 },
+                    { label: '3.0以上', min: 3.0, max: 999.0 }
+                ];
+                
+                const evStats = evBins.map(b => ({ label: b.label, count: 0, win: 0, invest: 0, return: 0 }));
+
+                clsRows.forEach(r => {
+                    const ev = parseFloat(r?.["最終確定期待値"]) || parseFloat(r?.["購入時期待値"]) || 0;
+                    const odds = parseFloat(r?.["最終確定オッズ"]) || parseFloat(r?.["購入時オッズ"]) || 0;
+                    const isHit = parseInt(r?.["着順"]) === 1;
+
+                    const binIdx = evBins.findIndex(b => ev >= b.min && ev < b.max);
+                    if (binIdx !== -1) {
+                        evStats[binIdx].count++;
+                        evStats[binIdx].invest += 100;
+                        if (isHit) {
+                            evStats[binIdx].win++;
+                            evStats[binIdx].return += odds * 100;
+                        }
+                    }
+                });
+
+                const evDetails = evStats.map(s => ({
+                    evBin: s.label,
+                    samples: s.count,
+                    winRate: s.count > 0 ? (s.win / s.count) * 100 : 0.0,
+                    recoveryRate: s.invest > 0 ? (s.return / s.invest) * 100 : 0.0
+                }));
+
                 return {
                     cls: c?.cls || "",
                     sampleSize: c?.sample || 0,
@@ -1072,7 +1106,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     rentaiRate: c?.top2Rate || 0.0,
                     placeRate: c?.top3Rate || 0.0,
                     winRecoveryRate: c?.roi || 0.0,
-                    umabanDetails: umabanDetails
+                    umabanDetails: umabanDetails,
+                    evDetails: evDetails
                 };
             });
 
@@ -1420,8 +1455,40 @@ document.addEventListener('DOMContentLoaded', () => {
             lowSampleFlags.push(g.count < 5);
         }
 
+        // EV帯別集計
+        const evBins = [
+            { label: '0.0〜0.4', min: 0.0, max: 0.5 },
+            { label: '0.5〜0.9', min: 0.5, max: 1.0 },
+            { label: '1.0〜1.4', min: 1.0, max: 1.5 },
+            { label: '1.5〜1.9', min: 1.5, max: 2.0 },
+            { label: '2.0〜2.9', min: 2.0, max: 3.0 },
+            { label: '3.0以上', min: 3.0, max: 999.0 }
+        ];
+        
+        const evStats = evBins.map(b => ({ label: b.label, count: 0, win: 0, invest: 0, return: 0 }));
+
+        clsData.forEach(r => {
+            const ev = parseFloat(r["最終確定期待値"]) || parseFloat(r["購入時期待値"]) || 0;
+            const odds = parseFloat(r["最終確定オッズ"]) || parseFloat(r["購入時オッズ"]) || 0;
+            const isHit = parseInt(r["着順"]) === 1;
+
+            const binIdx = evBins.findIndex(b => ev >= b.min && ev < b.max);
+            if (binIdx !== -1) {
+                evStats[binIdx].count++;
+                evStats[binIdx].invest += 100;
+                if (isHit) {
+                    evStats[binIdx].win++;
+                    evStats[binIdx].return += odds * 100;
+                }
+            }
+        });
+
+        const evLabels = evStats.map(s => s.label);
+        const evCounts = evStats.map(s => s.count);
+        const evRecoveryRates = evStats.map(s => s.invest > 0 ? (s.return / s.invest) * 100 : 0);
+
         // モーダル表示
-        document.getElementById('drilldownTitle').textContent = `📊 ${cls} クラス — 馬番別成績ドリルダウン (n=${clsData.length})`;
+        document.getElementById('drilldownTitle').textContent = `📊 ${cls} クラス 詳細分析 (n=${clsData.length})`;
         document.getElementById('classDrilldownModal').classList.remove('hidden');
 
         // チャート描画
@@ -1511,6 +1578,71 @@ document.addEventListener('DOMContentLoaded', () => {
                         title: { display: true, text: '率 (%)', color: '#94a3b8' },
                         min: 0,
                         max: 100,
+                        ticks: { color: '#94a3b8', callback: v => v + '%' },
+                        grid: { color: 'rgba(51, 65, 85, 0.5)' }
+                    },
+                    y1: {
+                        type: 'linear',
+                        position: 'right',
+                        title: { display: true, text: '出走回数', color: '#94a3b8' },
+                        min: 0,
+                        ticks: { color: '#94a3b8', stepSize: 1 },
+                        grid: { drawOnChartArea: false }
+                    }
+                }
+            }
+        });
+
+        if (window.drilldownEvChartInstance) window.drilldownEvChartInstance.destroy();
+        const evCtx = document.getElementById('drilldownEvChart').getContext('2d');
+        window.drilldownEvChartInstance = new Chart(evCtx, {
+            type: 'bar',
+            data: {
+                labels: evLabels,
+                datasets: [
+                    {
+                        type: 'bar',
+                        label: '出走回数',
+                        data: evCounts,
+                        backgroundColor: 'rgba(148, 163, 184, 0.2)',
+                        borderColor: 'rgba(148, 163, 184, 0.4)',
+                        borderWidth: 1,
+                        yAxisID: 'y1',
+                        order: 1
+                    },
+                    {
+                        type: 'line',
+                        label: '単勝回収率 (%)',
+                        data: evRecoveryRates,
+                        borderColor: '#f59e0b',
+                        backgroundColor: 'rgba(245, 158, 11, 0.08)',
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 4,
+                        pointBackgroundColor: '#f59e0b',
+                        yAxisID: 'y',
+                        order: 0
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                plugins: {
+                    legend: { labels: { color: '#e2e8f0', usePointStyle: true } }
+                },
+                scales: {
+                    x: {
+                        title: { display: true, text: 'EV帯', color: '#94a3b8' },
+                        ticks: { color: '#94a3b8' },
+                        grid: { color: 'rgba(51, 65, 85, 0.5)' }
+                    },
+                    y: {
+                        type: 'linear',
+                        position: 'left',
+                        title: { display: true, text: '回収率 (%)', color: '#94a3b8' },
+                        min: 0,
                         ticks: { color: '#94a3b8', callback: v => v + '%' },
                         grid: { color: 'rgba(51, 65, 85, 0.5)' }
                     },
