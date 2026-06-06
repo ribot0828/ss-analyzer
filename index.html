@@ -127,6 +127,27 @@
                     </div>
                 </section>
 
+                <!-- Rank-based EV Performance Area -->
+                <section class="glass-panel animate-fade">
+                    <div class="flex flex-col md:flex-row md:items-center md:justify-between mb-6 gap-4">
+                        <h3 class="text-lg font-semibold flex items-center gap-2 text-purple-400">
+                            📊 評価ランク別 EV成績分析
+                        </h3>
+                        <div class="flex flex-wrap gap-2" id="rank-ev-tabs">
+                            <button data-rank="S" class="rank-tab-btn px-4 py-2 rounded-lg font-bold bg-purple-600 text-white shadow-lg transition-all">S</button>
+                            <button data-rank="A" class="rank-tab-btn px-4 py-2 rounded-lg font-bold bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white transition-all">A</button>
+                            <button data-rank="B" class="rank-tab-btn px-4 py-2 rounded-lg font-bold bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white transition-all">B</button>
+                            <button data-rank="C" class="rank-tab-btn px-4 py-2 rounded-lg font-bold bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white transition-all">C</button>
+                            <button data-rank="D" class="rank-tab-btn px-4 py-2 rounded-lg font-bold bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white transition-all">D</button>
+                            <button data-rank="E" class="rank-tab-btn px-4 py-2 rounded-lg font-bold bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white transition-all">E</button>
+                            <button data-rank="F" class="rank-tab-btn px-4 py-2 rounded-lg font-bold bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white transition-all">F</button>
+                        </div>
+                    </div>
+                    <div class="chart-container" style="height: 400px; width: 100%;">
+                        <canvas id="rankEvChart"></canvas>
+                    </div>
+                </section>
+
                 <!-- Class Performance Table Area -->
                 <section class="glass-panel animate-fade">
                     <h3 class="text-lg font-semibold mb-6">📊 クラス別詳細パフォーマンス解析</h3>

@@ -281,6 +281,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
             drawEquityCurve(simulatedRaces);
 
+            initRankEvTabs(rowsWithRank);
+            renderRankEvAnalysis('S', rowsWithRank);
+
             const outliers = detectOutliers(rowsWithRank);
             renderOutliers(outliers);
 
@@ -906,6 +909,16 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('amberReportArea').innerHTML = html;
     }
 
+    // --- 評価ランク用固定EV帯(Bin) ---
+    const RANK_EV_BINS = [
+        { label: "0.0〜0.4", min: 0.0, max: 0.5 },
+        { label: "0.5〜0.9", min: 0.5, max: 1.0 },
+        { label: "1.0〜1.4", min: 1.0, max: 1.5 },
+        { label: "1.5〜1.9", min: 1.5, max: 2.0 },
+        { label: "2.0〜2.9", min: 2.0, max: 3.0 },
+        { label: "3.0以上", min: 3.0, max: 999.0 }
+    ];
+
     // --- 動的EV帯(Bin)生成ヘルパー ---
     function generateDynamicEvBins(rows) {
         const evValues = rows.map(r => parseFloat(r?.["最終確定期待値"]) || parseFloat(r?.["購入時期待値"]) || 0).filter(v => !isNaN(v));
@@ -1157,11 +1170,55 @@ document.addEventListener('DOMContentLoaded', () => {
             const safeAmber0 = (amberStats && amberStats[0]) ? amberStats[0] : { races: 0, hits: 0, roi: 0 };
             const safeAmber1 = (amberStats && amberStats[1]) ? amberStats[1] : { races: 0, hits: 0, roi: 0 };
 
+            // 評価ランク別成績
+            const evaluationPerformance = [];
+            const ranksList = ['S', 'A', 'B', 'C', 'D', 'E', 'F'];
+            ranksList.forEach(rank => {
+                const rankRows = (rowsWithRank || []).filter(r => (r?.["評価"] || "").toUpperCase().trim() === rank);
+                
+                const stats = RANK_EV_BINS.map(b => ({
+                    evBin: b.label, count: 0, win: 0, top3: 0, invest: 0, return: 0
+                }));
+
+                rankRows.forEach(r => {
+                    const ev = parseFloat(r?.["最終確定期待値"]) || parseFloat(r?.["購入時期待値"]) || 0;
+                    const odds = parseFloat(r?.["最終確定オッズ"]) || parseFloat(r?.["購入時オッズ"]) || 0;
+                    const pos = parseInt(r?.["着順"]);
+
+                    const binIdx = RANK_EV_BINS.findIndex(b => ev >= b.min && ev < b.max);
+                    if (binIdx !== -1) {
+                        stats[binIdx].count++;
+                        stats[binIdx].invest += 100;
+                        if (pos === 1) {
+                            stats[binIdx].win++;
+                            stats[binIdx].return += odds * 100;
+                        }
+                        if (pos <= 3) {
+                            stats[binIdx].top3++;
+                        }
+                    }
+                });
+
+                const evDetails = stats.map(s => ({
+                    evBin: s.evBin,
+                    samples: s.count,
+                    winRate: s.count > 0 ? (s.win / s.count) * 100 : 0.0,
+                    recoveryRate: s.invest > 0 ? (s.return / s.invest) * 100 : 0.0,
+                    placeRate: s.count > 0 ? (s.top3 / s.count) * 100 : 0.0
+                }));
+
+                evaluationPerformance.push({
+                    rank: rank,
+                    evDetails: evDetails
+                });
+            });
+
             const jsonPayload = {
                 summary: {
                     totalRaces: totalRaces,
                     overallRecoveryRate: overallRoi
                 },
+                evaluationPerformance: evaluationPerformance,
                 recommendationPerformance: recommendationPerformance,
                 densityPerformance: densityPerformance,
                 amberAudit: {
@@ -1813,6 +1870,140 @@ document.addEventListener('DOMContentLoaded', () => {
             options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: '#fff' } } }, scales: { x:{display:false}, y:{grid:{color:'#334155'}, ticks:{color:'#94a3b8'}} } }
         });
     }
+
+    let rankEvChartInstance = null;
+
+    function initRankEvTabs(rows) {
+        const tabs = document.querySelectorAll('.rank-tab-btn');
+        tabs.forEach(btn => {
+            const newBtn = btn.cloneNode(true);
+            btn.parentNode.replaceChild(newBtn, btn);
+            newBtn.addEventListener('click', () => {
+                document.querySelectorAll('.rank-tab-btn').forEach(b => {
+                    b.classList.remove('bg-purple-600', 'text-white', 'shadow-lg');
+                    b.classList.add('bg-slate-800', 'text-slate-300');
+                });
+                newBtn.classList.remove('bg-slate-800', 'text-slate-300');
+                newBtn.classList.add('bg-purple-600', 'text-white', 'shadow-lg');
+                
+                const rank = newBtn.getAttribute('data-rank');
+                renderRankEvAnalysis(rank, rows);
+            });
+        });
+    }
+
+    function renderRankEvAnalysis(rank, rows) {
+        const rankRows = rows.filter(r => (r["評価"] || "").toUpperCase().trim() === rank);
+        
+        const stats = RANK_EV_BINS.map(b => ({
+            label: b.label, count: 0, win: 0, top3: 0, invest: 0, return: 0
+        }));
+
+        rankRows.forEach(r => {
+            const ev = parseFloat(r["最終確定期待値"]) || parseFloat(r["購入時期待値"]) || 0;
+            const odds = parseFloat(r["最終確定オッズ"]) || parseFloat(r["購入時オッズ"]) || 0;
+            const pos = parseInt(r["着順"]);
+
+            const binIdx = RANK_EV_BINS.findIndex(b => ev >= b.min && ev < b.max);
+            if (binIdx !== -1) {
+                stats[binIdx].count++;
+                stats[binIdx].invest += 100;
+                if (pos === 1) {
+                    stats[binIdx].win++;
+                    stats[binIdx].return += odds * 100;
+                }
+                if (pos <= 3) {
+                    stats[binIdx].top3++;
+                }
+            }
+        });
+
+        const labels = stats.map(s => s.label);
+        const counts = stats.map(s => s.count);
+        const placeRates = stats.map(s => s.count > 0 ? (s.top3 / s.count) * 100 : 0.0);
+        const recoveryRates = stats.map(s => s.invest > 0 ? (s.return / s.invest) * 100 : 0.0);
+
+        const ctx = document.getElementById('rankEvChart');
+        if (!ctx) return;
+        if (rankEvChartInstance) rankEvChartInstance.destroy();
+        
+        rankEvChartInstance = new Chart(ctx.getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: [
+                    {
+                        type: 'bar',
+                        label: 'サンプル数',
+                        data: counts,
+                        backgroundColor: 'rgba(148, 163, 184, 0.2)',
+                        borderColor: 'rgba(148, 163, 184, 0.4)',
+                        borderWidth: 1,
+                        yAxisID: 'y1',
+                        order: 3
+                    },
+                    {
+                        type: 'line',
+                        label: '複勝率 (%)',
+                        data: placeRates,
+                        borderColor: '#3b82f6',
+                        backgroundColor: 'rgba(59, 130, 246, 0.08)',
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 4,
+                        pointBackgroundColor: '#3b82f6',
+                        yAxisID: 'y',
+                        order: 0
+                    },
+                    {
+                        type: 'line',
+                        label: '単勝回収率 (%)',
+                        data: recoveryRates,
+                        borderColor: '#f59e0b',
+                        backgroundColor: 'rgba(245, 158, 11, 0.08)',
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 4,
+                        pointBackgroundColor: '#f59e0b',
+                        yAxisID: 'y',
+                        order: 2
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                plugins: {
+                    legend: { labels: { color: '#e2e8f0', usePointStyle: true } }
+                },
+                scales: {
+                    x: {
+                        title: { display: true, text: 'EV帯', color: '#94a3b8' },
+                        ticks: { color: '#94a3b8' },
+                        grid: { color: 'rgba(51, 65, 85, 0.5)' }
+                    },
+                    y: {
+                        type: 'linear',
+                        position: 'left',
+                        title: { display: true, text: '率 (%)', color: '#94a3b8' },
+                        min: 0,
+                        ticks: { color: '#94a3b8', callback: v => v + '%' },
+                        grid: { color: 'rgba(51, 65, 85, 0.5)' }
+                    },
+                    y1: {
+                        type: 'linear',
+                        position: 'right',
+                        title: { display: true, text: 'サンプル数', color: '#94a3b8' },
+                        min: 0,
+                        ticks: { color: '#94a3b8', stepSize: 1 },
+                        grid: { drawOnChartArea: false }
+                    }
+                }
+            }
+        });
+    }
+
     // --- Simulator (Trio Backtest) ---
     runSimulatorBtn.addEventListener('click', () => {
         const r1 = Array.from(document.querySelectorAll('#sim-row1-classes input:checked')).map(i => i.value);
