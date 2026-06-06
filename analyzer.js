@@ -309,8 +309,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     const WIN_CORE_CLASSES = ['X', 'B1', 'D1', 'B2', 'B3', 'A2', 'A3', 'B0+'];
-    const PLACE_CORE_CLASSES_FULL = ['S0', 'S1', 'S2', 'A0', 'B0+', 'A1', 'B0'];
-    const AXIS_CLASSES = ['S0', 'S1', 'S2', 'A0', 'B0+', 'A1', 'B0'];
+    const PLACE_CORE_CLASSES_FULL = ['S0', 'S1', 'S2', 'A0', 'B0+', 'A1', 'B0', 'C0'];
+    const AXIS_CLASSES = ['S0', 'S1', 'S2', 'A0', 'B0+', 'A1', 'B0', 'C0'];
     const WIN_PRIORITY = ['A3', 'A2', 'B1', 'B3', 'B2', 'D1', 'X', 'B0+'];
     const TRIO_ROW2_DEFENSE = ['S0', 'S1', 'S2', 'A0', 'B0+', 'A1', 'B0'];
     const TRIO_ROW2_ATTACK = ['A3', 'B1', 'B2', 'X', 'D1', 'B3', 'A2'];
@@ -356,6 +356,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 else if (r === 'A' && ev < 0.600) cls = 'A0';
                 else if (r === 'B' && ev > 0.500 && ev <= 0.900) cls = 'B0';
                 else if (r === 'A' && ev >= 0.600 && ev <= 0.899) cls = 'A1';
+                else if (r === 'C' && winRate >= 0.05 && ev < 1.000) cls = 'C0';
                 else if (r === 'D' && ev >= 3.000 && ev <= 3.999) cls = 'X';
                 else if (r === 'B' && ev >= 1.500 && ev <= 1.699) cls = 'B2';
                 else if (r === 'B' && ev >= 1.100 && ev <= 1.350) cls = 'B1';
@@ -367,7 +368,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             let mao = 999;
             if (winRate > 0) {
-                if (['S0','S1','S2','A0','B0+','A1','B0'].includes(cls)) mao = 0.50 / winRate;
+                if (['S0','S1','S2','A0','B0+','A1','B0','C0'].includes(cls)) mao = 0.50 / winRate;
                 else if (['B1', 'B2', 'B3', 'A2', 'A3'].includes(cls)) mao = 0.90 / winRate;
                 else if (cls === 'X') mao = 3.00 / winRate;
                 else if (cls === 'D1') mao = 1.00 / winRate;
@@ -376,7 +377,7 @@ document.addEventListener('DOMContentLoaded', () => {
             let amberPass = false;
             if (cls === 'X' || cls === 'D1') {
                 amberPass = h.usedOdds >= mao;
-            } else if (['S0','S1','S2','A0','B0+','A1','B0','B1','B2','B3','A2', 'A3'].includes(cls)) {
+            } else if (['S0','S1','S2','A0','B0+','A1','B0','C0','B1','B2','B3','A2', 'A3'].includes(cls)) {
                 amberPass = h.usedOdds >= (mao * 1.2);
             }
             h.amberPass = amberPass;
@@ -420,7 +421,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const density = calculateSSDensity(raceHorses);
         
         // 優先順位の定数定義（念のため関数内に明記）
-        const PLACE_CORE_CLASSES = ['S0', 'S1', 'S2', 'A0', 'B0+', 'A1', 'B0'];
+        const PLACE_CORE_CLASSES = ['S0', 'S1', 'S2', 'A0', 'B0+', 'A1', 'B0', 'C0'];
         const WIN_CORE_CLASSES = ['X', 'B1', 'D1', 'B2', 'B3', 'A2', 'A3'];
         const WIN_PRIORITY_LOCAL = ['A3', 'A2', 'B1', 'B3', 'B2', 'D1', 'X', 'B0+'];
         const TRIO_ROW2_DEFENSE_LOCAL = ['S0', 'S1', 'S2', 'A0', 'B0+', 'A1', 'B0'];
@@ -554,7 +555,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 winCoreCands.sort(attackSort);
                 addToRow3(winCoreCands);
 
-                // 4. 残りのNクラスの馬（sortN適用）
+                // 4. C0クラスの馬（sortDefense適用）
+                let c0Cands = raceHorses.filter(h => h !== axisHorse && (h["最終確定クラス"] || h["購入時クラス"] || "").trim() === 'C0');
+                c0Cands.sort(sortDefense);
+                addToRow3(c0Cands);
+
+                // 5. 残りのNクラスの馬（sortN適用）
                 let nCands = raceHorses.filter(h => h !== axisHorse && ['N', ''].includes((h["最終確定クラス"] || h["購入時クラス"] || "").trim()));
                 nCands.sort(sortN);
                 addToRow3(nCands);
