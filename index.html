@@ -216,8 +216,15 @@
                 <h3 id="drilldownTitle" class="text-xl font-bold text-blue-400">クラス詳細</h3>
                 <button onclick="document.getElementById('classDrilldownModal').classList.add('hidden')" class="text-slate-400 hover:text-white text-2xl leading-none">&times;</button>
             </div>
-            <div class="chart-container" style="height: 350px; width: 100%; margin-bottom: 1.5rem;">
-                <canvas id="drilldownChart"></canvas>
+            <div class="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-6">
+                <div class="chart-container" style="height: 350px; width: 100%;">
+                    <h4 class="text-center text-sm text-slate-400 mb-2">馬番別 成績分析</h4>
+                    <canvas id="drilldownChart"></canvas>
+                </div>
+                <div class="chart-container" style="height: 350px; width: 100%;">
+                    <h4 class="text-center text-sm text-slate-400 mb-2">EV帯別 成績分析</h4>
+                    <canvas id="drilldownEvChart"></canvas>
+                </div>
             </div>
             <div id="drilldownTableArea" class="overflow-x-auto"></div>
         </div>
