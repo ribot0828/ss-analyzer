@@ -906,6 +906,47 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('amberReportArea').innerHTML = html;
     }
 
+    // --- 動的EV帯(Bin)生成ヘルパー ---
+    function generateDynamicEvBins(rows) {
+        const evValues = rows.map(r => parseFloat(r?.["最終確定期待値"]) || parseFloat(r?.["購入時期待値"]) || 0).filter(v => !isNaN(v));
+        if (evValues.length === 0) {
+            return [{ label: '0.0〜', min: 0.0, max: 999.0 }];
+        }
+        const minEvRaw = Math.min(...evValues);
+        const maxEvRaw = Math.max(...evValues);
+
+        let minEv = Math.floor(minEvRaw * 10) / 10;
+        let maxEv = Math.ceil(maxEvRaw * 10) / 10;
+        if (maxEv === minEv) maxEv += 0.1;
+
+        // 異常値対策として最大30ビン（EV差3.0）に制限
+        if ((maxEv - minEv) > 3.0) {
+            maxEv = minEv + 3.0;
+        }
+
+        const evBins = [];
+        for (let v = minEv; v < maxEv - 0.001; v += 0.1) {
+            const minBound = parseFloat(v.toFixed(1));
+            const maxBound = parseFloat((v + 0.1).toFixed(1));
+            evBins.push({
+                label: `${minBound.toFixed(1)}〜${(maxBound - 0.01).toFixed(2)}`,
+                min: minBound,
+                max: maxBound
+            });
+        }
+        
+        // もし最大値が制限で切られた場合のための最後の受け皿
+        if ((maxEvRaw * 10) / 10 > maxEv) {
+             evBins.push({
+                label: `${maxEv.toFixed(1)}以上`,
+                min: maxEv,
+                max: 999.0
+            });
+        }
+        
+        return evBins;
+    }
+
     // --- JSONエクスポート処理 ---
     function generateAndDownloadJSON() {
         if (!window.latestSimData) {
@@ -1070,14 +1111,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     recoveryRate: gateStats[g].invest > 0 ? (gateStats[g].return / gateStats[g].invest) * 100 : 0.0
                 }));
 
-                const evBins = [
-                    { label: '0.0〜0.4', min: 0.0, max: 0.5 },
-                    { label: '0.5〜0.9', min: 0.5, max: 1.0 },
-                    { label: '1.0〜1.4', min: 1.0, max: 1.5 },
-                    { label: '1.5〜1.9', min: 1.5, max: 2.0 },
-                    { label: '2.0〜2.9', min: 2.0, max: 3.0 },
-                    { label: '3.0以上', min: 3.0, max: 999.0 }
-                ];
+                const evBins = generateDynamicEvBins(clsRows);
                 
                 const evStats = evBins.map(b => ({ label: b.label, count: 0, win: 0, top3: 0, invest: 0, return: 0 }));
 
@@ -1464,15 +1498,8 @@ document.addEventListener('DOMContentLoaded', () => {
             lowSampleFlags.push(g.count < 5);
         }
 
-        // EV帯別集計
-        const evBins = [
-            { label: '0.0〜0.4', min: 0.0, max: 0.5 },
-            { label: '0.5〜0.9', min: 0.5, max: 1.0 },
-            { label: '1.0〜1.4', min: 1.0, max: 1.5 },
-            { label: '1.5〜1.9', min: 1.5, max: 2.0 },
-            { label: '2.0〜2.9', min: 2.0, max: 3.0 },
-            { label: '3.0以上', min: 3.0, max: 999.0 }
-        ];
+        // EV帯別集計 (動的0.1刻み)
+        const evBins = generateDynamicEvBins(clsData);
         
         const evStats = evBins.map(b => ({ label: b.label, count: 0, win: 0, top3: 0, invest: 0, return: 0 }));
 
