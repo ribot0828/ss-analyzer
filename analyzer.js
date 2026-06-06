@@ -288,7 +288,7 @@ document.addEventListener('DOMContentLoaded', () => {
             geminiOutput.value = md;
 
             // JSONエクスポートデータの保持
-            window.latestSimData = { rowsWithRank, riskStats, classStats, amberStats, recStats };
+            window.latestSimData = { rowsWithRank, riskStats, classStats, amberStats, recStats, simulatedRaces };
 
             const jsonBtn = document.getElementById('downloadJsonBtn');
             if (jsonBtn) jsonBtn.classList.remove('hidden');
@@ -914,7 +914,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         
         try {
-            const { rowsWithRank, classStats, amberStats, recStats } = window.latestSimData;
+            const { rowsWithRank, classStats, amberStats, recStats, simulatedRaces } = window.latestSimData;
             const totalRaces = parseInt(document.getElementById('stat-race-count')?.textContent || '0') || 0;
             const overallRoi = parseFloat(document.getElementById('stat-overall-roi')?.textContent || '0') || 0;
 
@@ -939,6 +939,44 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
             }
 
+            // SS密度別成績
+            const densityPerformance = {
+                "80%以上": { sampleRaces: 0, hitRate: 0.0, recoveryRate: 0.0, _hits: 0, _invest: 0, _return: 0, _betRaces: 0 },
+                "70%〜79%": { sampleRaces: 0, hitRate: 0.0, recoveryRate: 0.0, _hits: 0, _invest: 0, _return: 0, _betRaces: 0 },
+                "60%〜69%": { sampleRaces: 0, hitRate: 0.0, recoveryRate: 0.0, _hits: 0, _invest: 0, _return: 0, _betRaces: 0 },
+                "50%〜59%": { sampleRaces: 0, hitRate: 0.0, recoveryRate: 0.0, _hits: 0, _invest: 0, _return: 0, _betRaces: 0 },
+                "50%未満":  { sampleRaces: 0, hitRate: 0.0, recoveryRate: 0.0, _hits: 0, _invest: 0, _return: 0, _betRaces: 0 }
+            };
+
+            (simulatedRaces || []).forEach(r => {
+                const d = r?.ssDensity || 0;
+                let bin = "50%未満";
+                if (d >= 0.8) bin = "80%以上";
+                else if (d >= 0.7) bin = "70%〜79%";
+                else if (d >= 0.6) bin = "60%〜69%";
+                else if (d >= 0.5) bin = "50%〜59%";
+
+                const dp = densityPerformance[bin];
+                dp.sampleRaces++;
+
+                const wInv = r?.winInvest || 0;
+                const wRet = r?.winReturn || 0;
+                const tInv = r?.trioInvest || 0;
+                const tRet = r?.trioReturn || 0;
+                
+                dp._invest += wInv + tInv;
+                dp._return += wRet + tRet;
+                if (wInv > 0) { dp._betRaces++; if (wRet > 0) dp._hits++; }
+                if (tInv > 0) { dp._betRaces++; if (tRet > 0) dp._hits++; }
+            });
+
+            Object.keys(densityPerformance).forEach(k => {
+                const dp = densityPerformance[k];
+                dp.hitRate = dp._betRaces > 0 ? (dp._hits / dp._betRaces) * 100 : 0.0;
+                dp.recoveryRate = dp._invest > 0 ? (dp._return / dp._invest) * 100 : 0.0;
+                delete dp._hits; delete dp._invest; delete dp._return; delete dp._betRaces;
+            });
+
             // オッズ帯別分析 (X/D1)
             const oddsBinAnalysis = { "D1": [], "X": [] };
             const bins = [
@@ -953,8 +991,8 @@ document.addEventListener('DOMContentLoaded', () => {
             ['D1', 'X'].forEach(cls => {
                 const clsRows = (rowsWithRank || []).filter(r => (r?.["最終確定クラス"] || r?.["購入時クラス"] || "").trim() === cls);
                 bins.forEach(b => {
-                    let okCount = 0, okInvest = 0, okReturn = 0;
-                    let ngCount = 0, ngInvest = 0, ngReturn = 0;
+                    let okCount = 0, okInvest = 0, okReturn = 0, okHits = 0;
+                    let ngCount = 0, ngInvest = 0, ngReturn = 0, ngHits = 0;
 
                     clsRows.forEach(r => {
                         const odds = parseFloat(r?.["最終確定オッズ"]) || parseFloat(r?.["購入時オッズ"]) || 0;
@@ -963,11 +1001,11 @@ document.addEventListener('DOMContentLoaded', () => {
                             if (r?.auditStatus === 'NG') {
                                 ngCount++;
                                 ngInvest += 100;
-                                if (isHit) ngReturn += odds * 100;
+                                if (isHit) { ngReturn += odds * 100; ngHits++; }
                             } else {
                                 okCount++;
                                 okInvest += 100;
-                                if (isHit) okReturn += odds * 100;
+                                if (isHit) { okReturn += odds * 100; okHits++; }
                             }
                         }
                     });
@@ -976,11 +1014,13 @@ document.addEventListener('DOMContentLoaded', () => {
                         bin: b.label,
                         auditOK: {
                             samples: okCount,
-                            recovery: okInvest > 0 ? (okReturn / okInvest) * 100 : 0
+                            hitRate: okCount > 0 ? (okHits / okCount) * 100 : 0.0,
+                            recovery: okInvest > 0 ? (okReturn / okInvest) * 100 : 0.0
                         },
                         auditNG: {
                             samples: ngCount,
-                            recovery: ngInvest > 0 ? (ngReturn / ngInvest) * 100 : 0
+                            hitRate: ngCount > 0 ? (ngHits / ngCount) * 100 : 0.0,
+                            recovery: ngInvest > 0 ? (ngReturn / ngInvest) * 100 : 0.0
                         }
                     });
                 });
@@ -1008,26 +1048,31 @@ document.addEventListener('DOMContentLoaded', () => {
                 clsRows.forEach(r => {
                     const um = parseInt(r?.["馬番"]);
                     if (isNaN(um)) return;
-                    if (!gateStats[um]) gateStats[um] = { count: 0, win: 0 };
+                    const odds = parseFloat(r?.["最終確定オッズ"]) || parseFloat(r?.["購入時オッズ"]) || 0;
+                    if (!gateStats[um]) gateStats[um] = { count: 0, win: 0, invest: 0, return: 0 };
                     gateStats[um].count++;
-                    if (parseInt(r?.["着順"]) === 1) gateStats[um].win++;
+                    gateStats[um].invest += 100;
+                    if (parseInt(r?.["着順"]) === 1) {
+                        gateStats[um].win++;
+                        gateStats[um].return += odds * 100;
+                    }
                 });
 
-                // 回収率/勝率ベースのTop/Worst
-                let gates = Object.keys(gateStats).map(Number).filter(g => gateStats[g].count >= 3).map(g => ({
-                    gate: g,
-                    winRate: gateStats[g].win / gateStats[g].count
-                })).sort((a, b) => b.winRate - a.winRate);
+                const umabanDetails = Object.keys(gateStats).map(Number).sort((a, b) => a - b).map(g => ({
+                    umaban: g,
+                    samples: gateStats[g].count,
+                    winRate: gateStats[g].count > 0 ? (gateStats[g].win / gateStats[g].count) * 100 : 0.0,
+                    recoveryRate: gateStats[g].invest > 0 ? (gateStats[g].return / gateStats[g].invest) * 100 : 0.0
+                }));
 
                 return {
                     cls: c?.cls || "",
                     sampleSize: c?.sample || 0,
-                    winRate: c?.winRate || 0,
-                    rentaiRate: c?.top2Rate || 0,
-                    placeRate: c?.top3Rate || 0,
-                    winRecoveryRate: c?.roi || 0,
-                    topUmaban: gates.slice(0, 3).map(g => g.gate),
-                    worstUmaban: gates.slice(-3).reverse().map(g => g.gate)
+                    winRate: c?.winRate || 0.0,
+                    rentaiRate: c?.top2Rate || 0.0,
+                    placeRate: c?.top3Rate || 0.0,
+                    winRecoveryRate: c?.roi || 0.0,
+                    umabanDetails: umabanDetails
                 };
             });
 
@@ -1040,15 +1085,16 @@ document.addEventListener('DOMContentLoaded', () => {
                     overallRecoveryRate: overallRoi
                 },
                 recommendationPerformance: recommendationPerformance,
+                densityPerformance: densityPerformance,
                 amberAudit: {
                     passed: {
                         sampleSize: safeAmber0.races,
-                        hitRate: safeAmber0.races > 0 ? (safeAmber0.hits / safeAmber0.races) * 100 : 0,
+                        hitRate: safeAmber0.races > 0 ? (safeAmber0.hits / safeAmber0.races) * 100 : 0.0,
                         recoveryRate: safeAmber0.roi
                     },
                     failed: {
                         sampleSize: safeAmber1.races,
-                        hitRate: safeAmber1.races > 0 ? (safeAmber1.hits / safeAmber1.races) * 100 : 0,
+                        hitRate: safeAmber1.races > 0 ? (safeAmber1.hits / safeAmber1.races) * 100 : 0.0,
                         recoveryRate: safeAmber1.roi
                     }
                 },
