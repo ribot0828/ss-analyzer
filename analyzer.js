@@ -277,6 +277,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const md = generateUltimateMarkdown(riskStats, classStats, recStats, outliers);
         geminiOutput.value = md;
 
+        // JSONエクスポートデータの保持とボタン連携
+        window.latestSimData = { rowsWithRank, riskStats, classStats, amberStats };
+
         makeTableSortable(document.querySelector('#analysisResultArea table'));
         makeTableSortable(document.querySelector('#recommendationResultArea table'));
     }
@@ -874,6 +877,142 @@ document.addEventListener('DOMContentLoaded', () => {
         `;
         document.getElementById('amberReportArea').innerHTML = html;
     }
+
+    // --- JSONエクスポート処理 ---
+    document.getElementById('downloadJsonBtn').addEventListener('click', () => {
+        if (!window.latestSimData) {
+            showToast('シミュレーションが実行されていません');
+            return;
+        }
+        
+        const { rowsWithRank, riskStats, classStats, amberStats } = window.latestSimData;
+        const totalRaces = parseInt(document.getElementById('stat-race-count').textContent) || 0;
+        const overallRoi = parseFloat(document.getElementById('stat-overall-roi').textContent) || 0;
+
+        // オッズ帯別分析 (X/D1)
+        const oddsBinAnalysis = { "D1": [], "X": [] };
+        const bins = [
+            { label: '10.0未満', min: 0, max: 10.0 },
+            { label: '10.0〜19.9', min: 10.0, max: 20.0 },
+            { label: '20.0〜29.9', min: 20.0, max: 30.0 },
+            { label: '30.0〜39.9', min: 30.0, max: 40.0 },
+            { label: '40.0〜49.9', min: 40.0, max: 50.0 },
+            { label: '50.0以上', min: 50.0, max: 999999 }
+        ];
+
+        ['D1', 'X'].forEach(cls => {
+            const clsRows = rowsWithRank.filter(r => (r["最終確定クラス"] || r["購入時クラス"] || "").trim() === cls);
+            bins.forEach(b => {
+                let okCount = 0, okInvest = 0, okReturn = 0;
+                let ngCount = 0, ngInvest = 0, ngReturn = 0;
+
+                clsRows.forEach(r => {
+                    const odds = parseFloat(r["最終確定オッズ"]) || parseFloat(r["購入時オッズ"]) || 0;
+                    if (odds >= b.min && odds < b.max) {
+                        const isHit = parseInt(r["着順"]) === 1;
+                        if (r.auditStatus === 'NG') {
+                            ngCount++;
+                            ngInvest += 100;
+                            if (isHit) ngReturn += odds * 100;
+                        } else {
+                            okCount++;
+                            okInvest += 100;
+                            if (isHit) okReturn += odds * 100;
+                        }
+                    }
+                });
+
+                oddsBinAnalysis[cls].push({
+                    bin: b.label,
+                    auditOK: {
+                        samples: okCount,
+                        recovery: okInvest > 0 ? (okReturn / okInvest) * 100 : 0
+                    },
+                    auditNG: {
+                        samples: ngCount,
+                        recovery: ngInvest > 0 ? (ngReturn / ngInvest) * 100 : 0
+                    }
+                });
+            });
+        });
+
+        // クラス別成績（馬番詳細付き）
+        const classPerformance = classStats.map(c => {
+            const isNGClass = c.cls.endsWith('(NG)');
+            const baseCls = isNGClass ? c.cls.replace('(NG)', '') : c.cls;
+            
+            const clsRows = rowsWithRank.filter(r => {
+                const rCls = r["最終確定クラス"] || r["購入時クラス"] || "";
+                if (isNGClass) {
+                    return rCls === baseCls && r.auditStatus === 'NG';
+                } else {
+                    if (baseCls === 'X' || baseCls === 'D1') {
+                        return rCls === baseCls && r.auditStatus !== 'NG';
+                    }
+                    return rCls === c.cls;
+                }
+            });
+
+            // 馬番別成績
+            const gateStats = {};
+            clsRows.forEach(r => {
+                const um = parseInt(r["馬番"]);
+                if (isNaN(um)) return;
+                if (!gateStats[um]) gateStats[um] = { count: 0, win: 0 };
+                gateStats[um].count++;
+                if (parseInt(r["着順"]) === 1) gateStats[um].win++;
+            });
+
+            // 回収率/勝率ベースのTop/Worst
+            let gates = Object.keys(gateStats).map(Number).filter(g => gateStats[g].count >= 3).map(g => ({
+                gate: g,
+                winRate: gateStats[g].win / gateStats[g].count
+            })).sort((a, b) => b.winRate - a.winRate);
+
+            return {
+                cls: c.cls,
+                winRate: c.winRate,
+                rentaiRate: c.top2Rate,
+                placeRate: c.top3Rate,
+                topUmaban: gates.slice(0, 3).map(g => g.gate),
+                worstUmaban: gates.slice(-3).reverse().map(g => g.gate)
+            };
+        });
+
+        const jsonPayload = {
+            summary: {
+                totalRaces: totalRaces,
+                overallRecoveryRate: overallRoi
+            },
+            amberAudit: {
+                passed: {
+                    sampleSize: amberStats[0].races,
+                    hitRate: amberStats[0].races > 0 ? (amberStats[0].hits / amberStats[0].races) * 100 : 0,
+                    recoveryRate: amberStats[0].roi
+                },
+                failed: {
+                    sampleSize: amberStats[1].races,
+                    hitRate: amberStats[1].races > 0 ? (amberStats[1].hits / amberStats[1].races) * 100 : 0,
+                    recoveryRate: amberStats[1].roi
+                }
+            },
+            oddsBinAnalysis: oddsBinAnalysis,
+            classPerformance: classPerformance
+        };
+
+        const jsonString = JSON.stringify(jsonPayload, null, 2);
+        const blob = new Blob([jsonString], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'ss_feedback_data.json';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        showToast('JSONデータをダウンロードしました');
+    });
 
     let oddsAuditChartInstance = null;
     function renderOddsAuditAnalysis(rows) {
