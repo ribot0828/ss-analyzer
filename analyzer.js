@@ -244,44 +244,62 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     function performFullAnalysis() {
-        const rowsWithRank = filteredData.filter(d => d["着順"] && d["着順"].trim() !== "");
-        
-        const raceMap = {};
-        rowsWithRank.forEach(r => {
-            const id = getRaceId(r);
-            if (!raceMap[id]) raceMap[id] = [];
-            raceMap[id].push(r);
-        });
+        try {
+            const rowsWithRank = filteredData.filter(d => d["着順"] && d["着順"].trim() !== "");
+            
+            const raceMap = {};
+            rowsWithRank.forEach(r => {
+                const id = getRaceId(r);
+                if (!raceMap[id]) raceMap[id] = [];
+                raceMap[id].push(r);
+            });
 
-        const simulatedRaces = Object.keys(raceMap).map(id => simulateRace(raceMap[id], id));
+            const simulatedRaces = Object.keys(raceMap).map(id => simulateRace(raceMap[id], id));
 
-        const riskStats = calculateRiskMetrics(simulatedRaces);
-        renderRiskDashboard(riskStats);
+            const riskStats = calculateRiskMetrics(simulatedRaces);
+            renderRiskDashboard(riskStats);
 
-        const classStats = calculateClassStats(rowsWithRank);
-        renderClassTable(classStats);
+            const classStats = calculateClassStats(rowsWithRank);
+            renderClassTable(classStats);
 
-        renderOddsAuditAnalysis(rowsWithRank);
+            try {
+                renderOddsAuditAnalysis(rowsWithRank);
+            } catch (e) {
+                console.error("Odds Audit rendering error:", e);
+            }
 
-        const recStats = calculateRecommendationStats(simulatedRaces);
-        renderRecommendationTable(recStats);
+            const recStats = calculateRecommendationStats(simulatedRaces);
+            renderRecommendationTable(recStats);
 
-        const amberStats = calculateAmberStats(simulatedRaces);
-        renderAmberReport(amberStats);
+            let amberStats = [];
+            try {
+                amberStats = calculateAmberStats(simulatedRaces);
+                renderAmberReport(amberStats);
+            } catch (e) {
+                console.error("Amber Report rendering error:", e);
+            }
 
-        drawEquityCurve(simulatedRaces);
+            drawEquityCurve(simulatedRaces);
 
-        const outliers = detectOutliers(rowsWithRank);
-        renderOutliers(outliers);
+            const outliers = detectOutliers(rowsWithRank);
+            renderOutliers(outliers);
 
-        const md = generateUltimateMarkdown(riskStats, classStats, recStats, outliers);
-        geminiOutput.value = md;
+            const md = generateUltimateMarkdown(riskStats, classStats, recStats, outliers);
+            geminiOutput.value = md;
 
-        // JSONエクスポートデータの保持とボタン連携
-        window.latestSimData = { rowsWithRank, riskStats, classStats, amberStats };
+            // JSONエクスポートデータの保持
+            window.latestSimData = { rowsWithRank, riskStats, classStats, amberStats };
 
-        makeTableSortable(document.querySelector('#analysisResultArea table'));
-        makeTableSortable(document.querySelector('#recommendationResultArea table'));
+            const analysisTbl = document.querySelector('#analysisResultArea table');
+            if (analysisTbl) makeTableSortable(analysisTbl);
+
+            const recTbl = document.querySelector('#recommendationResultArea table');
+            if (recTbl) makeTableSortable(recTbl);
+
+        } catch (e) {
+            console.error("Full Analysis Error:", e);
+            showToast("解析中にエラーが発生しました。詳細はコンソールを確認してください。");
+        }
     }
 
     const WIN_CORE_CLASSES = ['X', 'B1', 'D1', 'B2', 'B3', 'A2', 'B0+'];
@@ -879,140 +897,153 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- JSONエクスポート処理 ---
-    document.getElementById('downloadJsonBtn').addEventListener('click', () => {
+    function generateAndDownloadJSON() {
         if (!window.latestSimData) {
             showToast('シミュレーションが実行されていません');
             return;
         }
         
-        const { rowsWithRank, riskStats, classStats, amberStats } = window.latestSimData;
-        const totalRaces = parseInt(document.getElementById('stat-race-count').textContent) || 0;
-        const overallRoi = parseFloat(document.getElementById('stat-overall-roi').textContent) || 0;
+        try {
+            const { rowsWithRank, classStats, amberStats } = window.latestSimData;
+            const totalRaces = parseInt(document.getElementById('stat-race-count')?.textContent || '0') || 0;
+            const overallRoi = parseFloat(document.getElementById('stat-overall-roi')?.textContent || '0') || 0;
 
-        // オッズ帯別分析 (X/D1)
-        const oddsBinAnalysis = { "D1": [], "X": [] };
-        const bins = [
-            { label: '10.0未満', min: 0, max: 10.0 },
-            { label: '10.0〜19.9', min: 10.0, max: 20.0 },
-            { label: '20.0〜29.9', min: 20.0, max: 30.0 },
-            { label: '30.0〜39.9', min: 30.0, max: 40.0 },
-            { label: '40.0〜49.9', min: 40.0, max: 50.0 },
-            { label: '50.0以上', min: 50.0, max: 999999 }
-        ];
+            // オッズ帯別分析 (X/D1)
+            const oddsBinAnalysis = { "D1": [], "X": [] };
+            const bins = [
+                { label: '10.0未満', min: 0, max: 10.0 },
+                { label: '10.0〜19.9', min: 10.0, max: 20.0 },
+                { label: '20.0〜29.9', min: 20.0, max: 30.0 },
+                { label: '30.0〜39.9', min: 30.0, max: 40.0 },
+                { label: '40.0〜49.9', min: 40.0, max: 50.0 },
+                { label: '50.0以上', min: 50.0, max: 999999 }
+            ];
 
-        ['D1', 'X'].forEach(cls => {
-            const clsRows = rowsWithRank.filter(r => (r["最終確定クラス"] || r["購入時クラス"] || "").trim() === cls);
-            bins.forEach(b => {
-                let okCount = 0, okInvest = 0, okReturn = 0;
-                let ngCount = 0, ngInvest = 0, ngReturn = 0;
+            ['D1', 'X'].forEach(cls => {
+                const clsRows = (rowsWithRank || []).filter(r => (r?.["最終確定クラス"] || r?.["購入時クラス"] || "").trim() === cls);
+                bins.forEach(b => {
+                    let okCount = 0, okInvest = 0, okReturn = 0;
+                    let ngCount = 0, ngInvest = 0, ngReturn = 0;
 
-                clsRows.forEach(r => {
-                    const odds = parseFloat(r["最終確定オッズ"]) || parseFloat(r["購入時オッズ"]) || 0;
-                    if (odds >= b.min && odds < b.max) {
-                        const isHit = parseInt(r["着順"]) === 1;
-                        if (r.auditStatus === 'NG') {
-                            ngCount++;
-                            ngInvest += 100;
-                            if (isHit) ngReturn += odds * 100;
-                        } else {
-                            okCount++;
-                            okInvest += 100;
-                            if (isHit) okReturn += odds * 100;
+                    clsRows.forEach(r => {
+                        const odds = parseFloat(r?.["最終確定オッズ"]) || parseFloat(r?.["購入時オッズ"]) || 0;
+                        if (odds >= b.min && odds < b.max) {
+                            const isHit = parseInt(r?.["着順"]) === 1;
+                            if (r?.auditStatus === 'NG') {
+                                ngCount++;
+                                ngInvest += 100;
+                                if (isHit) ngReturn += odds * 100;
+                            } else {
+                                okCount++;
+                                okInvest += 100;
+                                if (isHit) okReturn += odds * 100;
+                            }
                         }
+                    });
+
+                    oddsBinAnalysis[cls].push({
+                        bin: b.label,
+                        auditOK: {
+                            samples: okCount,
+                            recovery: okInvest > 0 ? (okReturn / okInvest) * 100 : 0
+                        },
+                        auditNG: {
+                            samples: ngCount,
+                            recovery: ngInvest > 0 ? (ngReturn / ngInvest) * 100 : 0
+                        }
+                    });
+                });
+            });
+
+            // クラス別成績（馬番詳細付き）
+            const classPerformance = (classStats || []).map(c => {
+                const isNGClass = c?.cls?.endsWith('(NG)') || false;
+                const baseCls = isNGClass ? c.cls.replace('(NG)', '') : (c?.cls || '');
+                
+                const clsRows = (rowsWithRank || []).filter(r => {
+                    const rCls = r?.["最終確定クラス"] || r?.["購入時クラス"] || "";
+                    if (isNGClass) {
+                        return rCls === baseCls && r?.auditStatus === 'NG';
+                    } else {
+                        if (baseCls === 'X' || baseCls === 'D1') {
+                            return rCls === baseCls && r?.auditStatus !== 'NG';
+                        }
+                        return rCls === c?.cls;
                     }
                 });
 
-                oddsBinAnalysis[cls].push({
-                    bin: b.label,
-                    auditOK: {
-                        samples: okCount,
-                        recovery: okInvest > 0 ? (okReturn / okInvest) * 100 : 0
-                    },
-                    auditNG: {
-                        samples: ngCount,
-                        recovery: ngInvest > 0 ? (ngReturn / ngInvest) * 100 : 0
-                    }
+                // 馬番別成績
+                const gateStats = {};
+                clsRows.forEach(r => {
+                    const um = parseInt(r?.["馬番"]);
+                    if (isNaN(um)) return;
+                    if (!gateStats[um]) gateStats[um] = { count: 0, win: 0 };
+                    gateStats[um].count++;
+                    if (parseInt(r?.["着順"]) === 1) gateStats[um].win++;
                 });
-            });
-        });
 
-        // クラス別成績（馬番詳細付き）
-        const classPerformance = classStats.map(c => {
-            const isNGClass = c.cls.endsWith('(NG)');
-            const baseCls = isNGClass ? c.cls.replace('(NG)', '') : c.cls;
-            
-            const clsRows = rowsWithRank.filter(r => {
-                const rCls = r["最終確定クラス"] || r["購入時クラス"] || "";
-                if (isNGClass) {
-                    return rCls === baseCls && r.auditStatus === 'NG';
-                } else {
-                    if (baseCls === 'X' || baseCls === 'D1') {
-                        return rCls === baseCls && r.auditStatus !== 'NG';
-                    }
-                    return rCls === c.cls;
-                }
+                // 回収率/勝率ベースのTop/Worst
+                let gates = Object.keys(gateStats).map(Number).filter(g => gateStats[g].count >= 3).map(g => ({
+                    gate: g,
+                    winRate: gateStats[g].win / gateStats[g].count
+                })).sort((a, b) => b.winRate - a.winRate);
+
+                return {
+                    cls: c?.cls || "",
+                    winRate: c?.winRate || 0,
+                    rentaiRate: c?.top2Rate || 0,
+                    placeRate: c?.top3Rate || 0,
+                    topUmaban: gates.slice(0, 3).map(g => g.gate),
+                    worstUmaban: gates.slice(-3).reverse().map(g => g.gate)
+                };
             });
 
-            // 馬番別成績
-            const gateStats = {};
-            clsRows.forEach(r => {
-                const um = parseInt(r["馬番"]);
-                if (isNaN(um)) return;
-                if (!gateStats[um]) gateStats[um] = { count: 0, win: 0 };
-                gateStats[um].count++;
-                if (parseInt(r["着順"]) === 1) gateStats[um].win++;
-            });
+            const safeAmber0 = (amberStats && amberStats[0]) ? amberStats[0] : { races: 0, hits: 0, roi: 0 };
+            const safeAmber1 = (amberStats && amberStats[1]) ? amberStats[1] : { races: 0, hits: 0, roi: 0 };
 
-            // 回収率/勝率ベースのTop/Worst
-            let gates = Object.keys(gateStats).map(Number).filter(g => gateStats[g].count >= 3).map(g => ({
-                gate: g,
-                winRate: gateStats[g].win / gateStats[g].count
-            })).sort((a, b) => b.winRate - a.winRate);
-
-            return {
-                cls: c.cls,
-                winRate: c.winRate,
-                rentaiRate: c.top2Rate,
-                placeRate: c.top3Rate,
-                topUmaban: gates.slice(0, 3).map(g => g.gate),
-                worstUmaban: gates.slice(-3).reverse().map(g => g.gate)
-            };
-        });
-
-        const jsonPayload = {
-            summary: {
-                totalRaces: totalRaces,
-                overallRecoveryRate: overallRoi
-            },
-            amberAudit: {
-                passed: {
-                    sampleSize: amberStats[0].races,
-                    hitRate: amberStats[0].races > 0 ? (amberStats[0].hits / amberStats[0].races) * 100 : 0,
-                    recoveryRate: amberStats[0].roi
+            const jsonPayload = {
+                summary: {
+                    totalRaces: totalRaces,
+                    overallRecoveryRate: overallRoi
                 },
-                failed: {
-                    sampleSize: amberStats[1].races,
-                    hitRate: amberStats[1].races > 0 ? (amberStats[1].hits / amberStats[1].races) * 100 : 0,
-                    recoveryRate: amberStats[1].roi
-                }
-            },
-            oddsBinAnalysis: oddsBinAnalysis,
-            classPerformance: classPerformance
-        };
+                amberAudit: {
+                    passed: {
+                        sampleSize: safeAmber0.races,
+                        hitRate: safeAmber0.races > 0 ? (safeAmber0.hits / safeAmber0.races) * 100 : 0,
+                        recoveryRate: safeAmber0.roi
+                    },
+                    failed: {
+                        sampleSize: safeAmber1.races,
+                        hitRate: safeAmber1.races > 0 ? (safeAmber1.hits / safeAmber1.races) * 100 : 0,
+                        recoveryRate: safeAmber1.roi
+                    }
+                },
+                oddsBinAnalysis: oddsBinAnalysis,
+                classPerformance: classPerformance
+            };
 
-        const jsonString = JSON.stringify(jsonPayload, null, 2);
-        const blob = new Blob([jsonString], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'ss_feedback_data.json';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-        
-        showToast('JSONデータをダウンロードしました');
-    });
+            const jsonString = JSON.stringify(jsonPayload, null, 2);
+            const blob = new Blob([jsonString], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'ss_feedback_data.json';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            showToast('JSONデータをダウンロードしました');
+        } catch (e) {
+            console.error("JSON生成エラー:", e);
+            showToast('JSONデータの生成に失敗しました: ' + e.message);
+        }
+    }
+
+    const downloadJsonBtn = document.getElementById('downloadJsonBtn');
+    if (downloadJsonBtn) {
+        downloadJsonBtn.addEventListener('click', generateAndDownloadJSON);
+    }
 
     let oddsAuditChartInstance = null;
     function renderOddsAuditAnalysis(rows) {
