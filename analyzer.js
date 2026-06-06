@@ -264,6 +264,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const recStats = calculateRecommendationStats(simulatedRaces);
         renderRecommendationTable(recStats);
 
+        const amberStats = calculateAmberStats(simulatedRaces);
+        renderAmberReport(amberStats);
+
         drawEquityCurve(simulatedRaces);
 
         const outliers = detectOutliers(rowsWithRank);
@@ -413,26 +416,32 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         };
 
-        // 【単勝シミュレーション馬選定】
+        // 【単勝シミュレーション馬選定とAmber検証用グループ分け】
         let finalWinBets = [];
-        let amberPassedHorses = raceHorses.filter(h => h.amberPass);
+        let amberFailBets = [];
         
+        let allWinCandidates = [];
         for (let clsName of WIN_PRIORITY_LOCAL) {
-            if (finalWinBets.length >= 2) break;
-            
-            let cands = amberPassedHorses.filter(h => (h["最終確定クラス"] || h["購入時クラス"] || "").trim() === clsName);
+            let cands = raceHorses.filter(h => (h["最終確定クラス"] || h["購入時クラス"] || "").trim() === clsName);
             if (cands.length > 0) {
                 cands.sort(attackSort); // 攻撃ソート適用
-                
                 for (let h of cands) {
-                    if (finalWinBets.length >= 2) break;
                     const umaban = parseInt(h["馬番"]);
                     // 壁フィルター
                     if (umaban >= 13 && ['A1', 'S2', 'A0'].includes(clsName)) continue;
-                    finalWinBets.push(h);
+                    allWinCandidates.push(h);
                 }
             }
         }
+
+        // 1. グループA：Amber通過（実購入）
+        for (let h of allWinCandidates) {
+            if (finalWinBets.length >= 2) break;
+            if (h.amberPass) finalWinBets.push(h);
+        }
+
+        // 2. グループB：Amber見送り（回避した罠: Amber無視で上位2頭に入るはずだったが弾かれた馬）
+        amberFailBets = allWinCandidates.slice(0, 2).filter(h => !h.amberPass);
 
         // 【三連複シミュレーション買い目選定】
         let finalTrioCombos = [];
@@ -568,16 +577,22 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         let winReturn = 0;
-        finalWinBets.forEach(h => {
+        let amberFailReturn = 0;
+
+        const calcReturn = (h) => {
             if (parseInt(h["着順"]) === 1) {
                 const umaban = h["馬番"];
                 if (actualWinPayoutMap[umaban]) {
-                    winReturn += actualWinPayoutMap[umaban];
+                    return actualWinPayoutMap[umaban];
                 } else {
-                    winReturn += (parseFloat(h["最終確定オッズ"]) || parseFloat(h["購入時オッズ"]) || 0) * 100;
+                    return (parseFloat(h["最終確定オッズ"]) || parseFloat(h["購入時オッズ"]) || 0) * 100;
                 }
             }
-        });
+            return 0;
+        };
+
+        finalWinBets.forEach(h => { winReturn += calcReturn(h); });
+        amberFailBets.forEach(h => { amberFailReturn += calcReturn(h); });
 
         let trioReturn = 0;
         let trioHit = false;
@@ -615,6 +630,8 @@ document.addEventListener('DOMContentLoaded', () => {
             rec: determineRecommendation(raceHorses),
             winInvest: finalWinBets.length * 100,
             winReturn: winReturn,
+            amberFailInvest: amberFailBets.length * 100,
+            amberFailReturn: amberFailReturn,
             trioInvest: isLegacyRace ? 0 : finalTrioCombos.length * 100,
             trioReturn: trioReturn
         };
@@ -745,6 +762,45 @@ document.addEventListener('DOMContentLoaded', () => {
         }).filter(s => s.raceCount > 0);
     }
 
+    function calculateAmberStats(simulatedRaces) {
+        let passInvest = 0, passReturn = 0, passHits = 0, passRaces = 0;
+        let failInvest = 0, failReturn = 0, failHits = 0, failRaces = 0;
+
+        simulatedRaces.forEach(r => {
+            if (r.winInvest > 0) {
+                passRaces++;
+                passInvest += r.winInvest;
+                passReturn += r.winReturn;
+                if (r.winReturn > 0) passHits++;
+            }
+            if (r.amberFailInvest > 0) {
+                failRaces++;
+                failInvest += r.amberFailInvest;
+                failReturn += r.amberFailReturn;
+                if (r.amberFailReturn > 0) failHits++;
+            }
+        });
+
+        return [
+            {
+                name: '🟢 通過 (実購入)',
+                races: passRaces,
+                invest: passInvest,
+                return: passReturn,
+                hits: passHits,
+                roi: passInvest > 0 ? (passReturn / passInvest) * 100 : 0
+            },
+            {
+                name: '⚠️ 見送り (回避した罠)',
+                races: failRaces,
+                invest: failInvest,
+                return: failReturn,
+                hits: failHits,
+                roi: failInvest > 0 ? (failReturn / failInvest) * 100 : 0
+            }
+        ];
+    }
+
     function renderRecommendationTable(stats) {
         const recColors = { 'SSS': 'text-yellow-300', 'SS': 'text-orange-400', 'S': 'text-blue-400', 'Low': 'text-slate-400' };
         const fmtHitRate = (hits, total) => total > 0 ? `${(hits / total * 100).toFixed(1)}% (${hits}/${total})` : '-';
@@ -785,6 +841,36 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
         `;
         recommendationResultArea.innerHTML = html;
+    }
+
+    function renderAmberReport(stats) {
+        let html = `
+            <div class="overflow-x-auto">
+                <table class="analysis-table w-full text-sm">
+                    <thead>
+                        <tr>
+                            <th>判定ステータス</th>
+                            <th>対象レース数</th>
+                            <th>仮想投資額</th>
+                            <th>的中率</th>
+                            <th>回収率</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${stats.map(s => `
+                            <tr>
+                                <td class="font-bold">${s.name}</td>
+                                <td>${s.races}</td>
+                                <td>${s.invest.toLocaleString()}円</td>
+                                <td>${s.races > 0 ? (s.hits / s.races * 100).toFixed(1) : '0'}% (${s.hits}/${s.races})</td>
+                                <td class="${s.roi >= 100 ? 'text-green-400 font-bold' : ''}">${s.roi.toFixed(1)}%</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        `;
+        document.getElementById('amberReportArea').innerHTML = html;
     }
 
     function makeTableSortable(tableEl) {
