@@ -854,7 +854,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     </thead>
                     <tbody>
                         ${stats.map(s => `
-                            <tr>
+                            <tr data-cls="${s.cls}" class="cursor-pointer hover:bg-slate-700/50 transition-colors" title="クリックで馬番別詳細を表示">
                                 <td class="font-bold">${s.sample >= 30 ? '✅' : '⚠️'} ${s.cls}</td>
                                 <td>${s.sample}</td>
                                 <td>${s.winRate.toFixed(1)}% (${s.wins}/${s.sample})</td>
@@ -870,6 +870,210 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
         `;
         analysisResultArea.innerHTML = html;
+
+        // 行クリックイベントの登録
+        analysisResultArea.querySelectorAll('tr[data-cls]').forEach(row => {
+            row.addEventListener('click', () => {
+                const cls = row.getAttribute('data-cls');
+                openClassDrilldown(cls);
+            });
+        });
+    }
+
+    let drilldownChartInstance = null;
+
+    function openClassDrilldown(cls) {
+        // 監査NG付きクラスの場合、元のクラス名と監査ステータスで絞り込む
+        const isNGClass = cls.endsWith('(NG)');
+        const baseCls = isNGClass ? cls.replace('(NG)', '') : cls;
+
+        const clsData = filteredData.filter(r => {
+            const rCls = r["最終確定クラス"] || r["購入時クラス"] || "";
+            if (isNGClass) {
+                return rCls === baseCls && r.auditStatus === 'NG';
+            } else {
+                // 通常クラス: NGではないものすべて
+                if (baseCls === 'X' || baseCls === 'D1') {
+                    return rCls === baseCls && r.auditStatus !== 'NG';
+                }
+                return rCls === cls;
+            }
+        }).filter(r => r["着順"] && r["着順"].trim() !== "");
+
+        if (clsData.length === 0) {
+            showToast(`${cls} のデータがありません`);
+            return;
+        }
+
+        // 馬番別集計（1〜18）
+        const gateStats = {};
+        clsData.forEach(r => {
+            const um = parseInt(r["馬番"]);
+            if (isNaN(um) || um < 1) return;
+            if (!gateStats[um]) gateStats[um] = { count: 0, win: 0, top2: 0, top3: 0 };
+            gateStats[um].count++;
+            const rank = parseInt(r["着順"]);
+            if (rank === 1) gateStats[um].win++;
+            if (rank <= 2) gateStats[um].top2++;
+            if (rank <= 3) gateStats[um].top3++;
+        });
+
+        const maxGate = Math.max(...Object.keys(gateStats).map(Number), 18);
+        const labels = [];
+        const counts = [];
+        const winRates = [];
+        const top2Rates = [];
+        const top3Rates = [];
+        const lowSampleFlags = [];
+
+        for (let i = 1; i <= maxGate; i++) {
+            labels.push(i.toString());
+            const g = gateStats[i] || { count: 0, win: 0, top2: 0, top3: 0 };
+            counts.push(g.count);
+            winRates.push(g.count > 0 ? (g.win / g.count) * 100 : 0);
+            top2Rates.push(g.count > 0 ? (g.top2 / g.count) * 100 : 0);
+            top3Rates.push(g.count > 0 ? (g.top3 / g.count) * 100 : 0);
+            lowSampleFlags.push(g.count < 5);
+        }
+
+        // モーダル表示
+        document.getElementById('drilldownTitle').textContent = `📊 ${cls} クラス — 馬番別成績ドリルダウン (n=${clsData.length})`;
+        document.getElementById('classDrilldownModal').classList.remove('hidden');
+
+        // チャート描画
+        if (drilldownChartInstance) drilldownChartInstance.destroy();
+        const ctx = document.getElementById('drilldownChart').getContext('2d');
+        drilldownChartInstance = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: [
+                    {
+                        type: 'bar',
+                        label: '出走回数',
+                        data: counts,
+                        backgroundColor: counts.map((_, i) => lowSampleFlags[i] ? 'rgba(239, 68, 68, 0.25)' : 'rgba(148, 163, 184, 0.2)'),
+                        borderColor: counts.map((_, i) => lowSampleFlags[i] ? 'rgba(239, 68, 68, 0.5)' : 'rgba(148, 163, 184, 0.4)'),
+                        borderWidth: 1,
+                        yAxisID: 'y1',
+                        order: 3
+                    },
+                    {
+                        type: 'line',
+                        label: '複勝率',
+                        data: top3Rates,
+                        borderColor: '#3b82f6',
+                        backgroundColor: 'rgba(59, 130, 246, 0.08)',
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 4,
+                        pointBackgroundColor: top3Rates.map((_, i) => lowSampleFlags[i] ? '#ef4444' : '#3b82f6'),
+                        yAxisID: 'y',
+                        order: 0
+                    },
+                    {
+                        type: 'line',
+                        label: '連対率',
+                        data: top2Rates,
+                        borderColor: '#a855f7',
+                        backgroundColor: 'rgba(168, 85, 247, 0.08)',
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 4,
+                        pointBackgroundColor: top2Rates.map((_, i) => lowSampleFlags[i] ? '#ef4444' : '#a855f7'),
+                        yAxisID: 'y',
+                        order: 1
+                    },
+                    {
+                        type: 'line',
+                        label: '勝率',
+                        data: winRates,
+                        borderColor: '#10b981',
+                        backgroundColor: 'rgba(16, 185, 129, 0.08)',
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 4,
+                        pointBackgroundColor: winRates.map((_, i) => lowSampleFlags[i] ? '#ef4444' : '#10b981'),
+                        yAxisID: 'y',
+                        order: 2
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                plugins: {
+                    legend: { labels: { color: '#e2e8f0', usePointStyle: true } },
+                    tooltip: {
+                        callbacks: {
+                            afterBody: (items) => {
+                                const idx = items[0].dataIndex;
+                                if (lowSampleFlags[idx]) return '⚠️ サンプル数不足 (n<5)';
+                                return '';
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        title: { display: true, text: '馬番', color: '#94a3b8' },
+                        ticks: { color: '#94a3b8' },
+                        grid: { color: 'rgba(51, 65, 85, 0.5)' }
+                    },
+                    y: {
+                        type: 'linear',
+                        position: 'left',
+                        title: { display: true, text: '率 (%)', color: '#94a3b8' },
+                        min: 0,
+                        max: 100,
+                        ticks: { color: '#94a3b8', callback: v => v + '%' },
+                        grid: { color: 'rgba(51, 65, 85, 0.5)' }
+                    },
+                    y1: {
+                        type: 'linear',
+                        position: 'right',
+                        title: { display: true, text: '出走回数', color: '#94a3b8' },
+                        min: 0,
+                        ticks: { color: '#94a3b8', stepSize: 1 },
+                        grid: { drawOnChartArea: false }
+                    }
+                }
+            }
+        });
+
+        // テーブル描画
+        let tblHtml = `
+            <table class="analysis-table w-full text-xs mt-4">
+                <thead>
+                    <tr>
+                        <th>馬番</th><th>出走数</th><th>勝率</th><th>連対率</th><th>複勝率</th><th>1着</th><th>2着</th><th>3着</th>
+                    </tr>
+                </thead>
+                <tbody>
+        `;
+        for (let i = 1; i <= maxGate; i++) {
+            const g = gateStats[i] || { count: 0, win: 0, top2: 0, top3: 0 };
+            if (g.count === 0) continue;
+            const warnCls = g.count < 5 ? 'text-red-400' : '';
+            const wr = ((g.win / g.count) * 100).toFixed(1);
+            const t2r = ((g.top2 / g.count) * 100).toFixed(1);
+            const t3r = ((g.top3 / g.count) * 100).toFixed(1);
+            tblHtml += `
+                <tr class="${warnCls}">
+                    <td class="font-bold">${g.count < 5 ? '⚠️' : ''} ${i}</td>
+                    <td>${g.count}</td>
+                    <td>${wr}%</td>
+                    <td>${t2r}%</td>
+                    <td>${t3r}%</td>
+                    <td>${g.win}</td>
+                    <td>${g.top2 - g.win}</td>
+                    <td>${g.top3 - g.top2}</td>
+                </tr>
+            `;
+        }
+        tblHtml += '</tbody></table>';
+        document.getElementById('drilldownTableArea').innerHTML = tblHtml;
     }
 
     function renderOutliers(list) {
