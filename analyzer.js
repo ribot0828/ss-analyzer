@@ -261,6 +261,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const classStats = calculateClassStats(rowsWithRank);
         renderClassTable(classStats);
 
+        renderOddsAuditAnalysis(rowsWithRank);
+
         const recStats = calculateRecommendationStats(simulatedRaces);
         renderRecommendationTable(recStats);
 
@@ -871,6 +873,152 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
         `;
         document.getElementById('amberReportArea').innerHTML = html;
+    }
+
+    let oddsAuditChartInstance = null;
+    function renderOddsAuditAnalysis(rows) {
+        // 対象クラス (X, D1) のみ抽出
+        const targetData = rows.filter(r => {
+            const cls = (r["最終確定クラス"] || r["購入時クラス"] || "").trim();
+            return cls === 'X' || cls === 'D1';
+        });
+
+        // オッズ帯の定義
+        const bins = [
+            { label: '10.0未満', min: 0, max: 10.0 },
+            { label: '10.0〜19.9', min: 10.0, max: 20.0 },
+            { label: '20.0〜29.9', min: 20.0, max: 30.0 },
+            { label: '30.0〜39.9', min: 30.0, max: 40.0 },
+            { label: '40.0〜49.9', min: 40.0, max: 50.0 },
+            { label: '50.0以上', min: 50.0, max: 999999 }
+        ];
+
+        // 各binの集計用構造
+        const stats = bins.map(b => ({
+            label: b.label,
+            okCount: 0, okInvest: 0, okReturn: 0,
+            ngCount: 0, ngInvest: 0, ngReturn: 0
+        }));
+
+        targetData.forEach(r => {
+            const odds = parseFloat(r["最終確定オッズ"]) || parseFloat(r["購入時オッズ"]) || 0;
+            const isNG = r.auditStatus === 'NG';
+            const isHit = parseInt(r["着順"]) === 1;
+
+            const binIdx = bins.findIndex(b => odds >= b.min && odds < b.max);
+            if (binIdx === -1) return;
+
+            if (isNG) {
+                stats[binIdx].ngCount++;
+                stats[binIdx].ngInvest += 100;
+                if (isHit) stats[binIdx].ngReturn += odds * 100;
+            } else {
+                stats[binIdx].okCount++;
+                stats[binIdx].okInvest += 100;
+                if (isHit) stats[binIdx].okReturn += odds * 100;
+            }
+        });
+
+        // 配列化
+        const labels = stats.map(s => s.label);
+        const okRoi = stats.map(s => s.okInvest > 0 ? (s.okReturn / s.okInvest) * 100 : 0);
+        const ngRoi = stats.map(s => s.ngInvest > 0 ? (s.ngReturn / s.ngInvest) * 100 : 0);
+        const totalCounts = stats.map(s => s.okCount + s.ngCount);
+
+        if (oddsAuditChartInstance) oddsAuditChartInstance.destroy();
+        const ctx = document.getElementById('oddsAuditChart').getContext('2d');
+        
+        oddsAuditChartInstance = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: [
+                    {
+                        type: 'line',
+                        label: '出走頭数(件)',
+                        data: totalCounts,
+                        borderColor: '#94a3b8',
+                        backgroundColor: '#94a3b8',
+                        yAxisID: 'y1',
+                        tension: 0.3,
+                        pointRadius: 4,
+                        order: 0
+                    },
+                    {
+                        type: 'bar',
+                        label: '監査OK 回収率(%)',
+                        data: okRoi,
+                        backgroundColor: 'rgba(59, 130, 246, 0.8)', // blue-500
+                        yAxisID: 'y',
+                        order: 1
+                    },
+                    {
+                        type: 'bar',
+                        label: '監査NG 回収率(%)',
+                        data: ngRoi,
+                        backgroundColor: 'rgba(239, 68, 68, 0.8)', // red-500
+                        yAxisID: 'y',
+                        order: 2
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    mode: 'index',
+                    intersect: false
+                },
+                plugins: {
+                    legend: { labels: { color: '#e2e8f0' } },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                let label = context.dataset.label || '';
+                                if (label) {
+                                    label += ': ';
+                                }
+                                if (context.dataset.yAxisID === 'y') {
+                                    label += context.parsed.y.toFixed(1) + '%';
+                                    const stat = stats[context.dataIndex];
+                                    if (context.datasetIndex === 1) { // OK ROI
+                                        label += ` (n=${stat.okCount})`;
+                                    } else if (context.datasetIndex === 2) { // NG ROI
+                                        label += ` (n=${stat.ngCount})`;
+                                    }
+                                } else {
+                                    label += context.parsed.y + '件';
+                                }
+                                return label;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        title: { display: true, text: '確定オッズ帯', color: '#94a3b8' },
+                        ticks: { color: '#94a3b8' },
+                        grid: { color: 'rgba(51, 65, 85, 0.5)' }
+                    },
+                    y: {
+                        type: 'linear',
+                        position: 'left',
+                        title: { display: true, text: '単勝回収率 (%)', color: '#94a3b8' },
+                        min: 0,
+                        ticks: { color: '#94a3b8' },
+                        grid: { color: 'rgba(51, 65, 85, 0.5)' }
+                    },
+                    y1: {
+                        type: 'linear',
+                        position: 'right',
+                        title: { display: true, text: '出走頭数', color: '#94a3b8' },
+                        min: 0,
+                        ticks: { color: '#94a3b8' },
+                        grid: { drawOnChartArea: false }
+                    }
+                }
+            }
+        });
     }
 
     function makeTableSortable(tableEl) {
