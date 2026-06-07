@@ -544,27 +544,32 @@ document.addEventListener('DOMContentLoaded', () => {
                 // 1. 2列目の全馬（ソート不要、そのまま追加）
                 addToRow3(row2);
                 
-                // 2. 評価Sの全馬（sortDefense適用）
-                let sCands = raceHorses.filter(h => h !== axisHorse && (h["評価"] || "").toUpperCase().trim() === 'S');
-                sCands.sort(sortDefense);
-                addToRow3(sCands);
-                
-                // 3. Place-Core系の全馬（sortDefense適用）
+                // 2. Place-Core系の全馬（sortDefense適用）
                 let placeCoreCands = raceHorses.filter(h => h !== axisHorse && PLACE_CORE_CLASSES.includes((h["最終確定クラス"] || h["購入時クラス"] || "").trim()));
                 placeCoreCands.sort(sortDefense);
                 addToRow3(placeCoreCands);
 
-                // 4. Win-Core系の全馬（attackSort適用）
+                // 3. Win-Core系の全馬（attackSort適用）
                 let winCoreCands = raceHorses.filter(h => h !== axisHorse && WIN_CORE_CLASSES.includes((h["最終確定クラス"] || h["購入時クラス"] || "").trim()));
                 winCoreCands.sort(attackSort);
                 addToRow3(winCoreCands);
 
-                // 5. 残りのNクラスの馬（sortN適用）
-                let nCands = raceHorses.filter(h => h !== axisHorse && ['N', ''].includes((h["最終確定クラス"] || h["購入時クラス"] || "").trim()));
+                // 4. Nクラスの馬（条件付き追加: 単勝オッズ>=15.0 ＆ 評価A/B/D）
+                let nCands = raceHorses.filter(h => {
+                    if (h === axisHorse) return false;
+                    const isN = ['N', ''].includes((h["最終確定クラス"] || h["購入時クラス"] || "").trim());
+                    if (!isN) return false;
+                    
+                    const odds = parseFloat(h["最終確定オッズ"]) || parseFloat(h["購入時オッズ"]) || 0;
+                    const evalRank = (h["評価"] || "").toUpperCase().trim();
+                    const isValidEval = ['A', 'B', 'D'].includes(evalRank);
+                    
+                    return odds >= 15.0 && isValidEval;
+                });
                 nCands.sort(sortN);
                 addToRow3(nCands);
 
-                row3Array = row3.slice(0, 10); // 最大10頭
+                row3Array = row3.slice(0, 6); // 最大6頭
 
                 // 組み合わせの生成
                 row2.forEach(h2 => {
