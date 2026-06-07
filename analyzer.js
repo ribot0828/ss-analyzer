@@ -654,64 +654,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
-        let wideInvest = 0;
-        let wideReturn = 0;
-        let wideBets = []; 
-        
-        if (axisHorse && finalWinBets.length > 0) {
-            finalWinBets.forEach(wHorse => {
-                if (wHorse["馬番"] !== axisHorse["馬番"]) {
-                    let u1 = parseInt(axisHorse["馬番"]);
-                    let u2 = parseInt(wHorse["馬番"]);
-                    let combo = [u1, u2].sort((a,b)=>a-b).join('-');
-                    if (!wideBets.includes(combo)) wideBets.push(combo);
-                }
-            });
-        }
-        
-        wideInvest = isLegacyRace ? 0 : wideBets.length * 100;
-
-        if (!isLegacyRace && wideBets.length > 0) {
-            const winners = raceHorses.filter(h => parseInt(h["着順"]) <= 3).map(h => parseInt(h["馬番"]));
-            let hitCombos = wideBets.filter(combo => {
-                let parts = combo.split('-').map(Number);
-                return winners.includes(parts[0]) && winners.includes(parts[1]);
-            });
-
-            if (hitCombos.length > 0) {
-                let widePayouts = [];
-                let wideStringMap = {};
-                raceHorses.forEach(h => {
-                    let wStr = (h["ワイド払戻"] || "").toString().trim();
-                    if (!wStr || wStr === "0") return;
-                    
-                    let parts = wStr.split('/');
-                    parts.forEach(p => {
-                        let m = p.match(/(\d+)\s*[-=]\s*(\d+)\s*[:=]\s*(\d+)/);
-                        if (m) {
-                            let combo = [parseInt(m[1]), parseInt(m[2])].sort((a,b)=>a-b).join('-');
-                            wideStringMap[combo] = parseInt(m[3]);
-                        } else {
-                            let valStr = p.replace(/[^\d]/g, '');
-                            if (valStr) {
-                                let val = parseInt(valStr);
-                                if (!isNaN(val) && val > 0) widePayouts.push(val);
-                            }
-                        }
-                    });
-                });
-                widePayouts.sort((a,b) => a - b); // Ascending
-
-                hitCombos.forEach(combo => {
-                    if (wideStringMap[combo]) {
-                        wideReturn += wideStringMap[combo];
-                    } else if (widePayouts.length > 0) {
-                        wideReturn += widePayouts.shift(); 
-                    }
-                });
-            }
-        }
-
         return {
             id: raceId,
             horses: raceHorses,
@@ -728,9 +670,7 @@ document.addEventListener('DOMContentLoaded', () => {
             amberFailInvest: amberFailBets.length * 100,
             amberFailReturn: amberFailReturn,
             trioInvest: isLegacyRace ? 0 : finalTrioCombos.length * 100,
-            trioReturn: trioReturn,
-            wideInvest: wideInvest,
-            wideReturn: wideReturn
+            trioReturn: trioReturn
         };
     }
 
@@ -828,32 +768,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
             let winInvest = 0;
             let winReturn = 0;
-            let wideInvest = 0;
-            let wideReturn = 0;
             let trioInvest = 0;
             let trioReturn = 0;
             let winHits = 0;
             let winBetRaces = 0;
-            let wideHits = 0;
-            let wideBetRaces = 0;
             let trioHits = 0;
             let trioBetRaces = 0;
 
             races.forEach(r => {
                 winInvest += r.winInvest;
                 winReturn += r.winReturn;
-                wideInvest += r.wideInvest || 0;
-                wideReturn += r.wideReturn || 0;
                 trioInvest += r.trioInvest;
                 trioReturn += r.trioReturn;
-                
                 if (r.winInvest > 0) {
                     winBetRaces++;
                     if (r.winReturn > 0) winHits++;
-                }
-                if ((r.wideInvest || 0) > 0) {
-                    wideBetRaces++;
-                    if ((r.wideReturn || 0) > 0) wideHits++;
                 }
                 if (r.trioInvest > 0) {
                     trioBetRaces++;
@@ -862,18 +791,11 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
             const winROI = winInvest > 0 ? (winReturn / winInvest) * 100 : 0;
-            const wideROI = wideInvest > 0 ? (wideReturn / wideInvest) * 100 : 0;
             const trioROI = trioInvest > 0 ? (trioReturn / trioInvest) * 100 : 0;
-            const totalInvest = winInvest + wideInvest + trioInvest;
-            const totalROI = totalInvest > 0 ? ((winReturn + wideReturn + trioReturn) / totalInvest) * 100 : 0;
+            const totalInvest = winInvest + trioInvest;
+            const totalROI = totalInvest > 0 ? ((winReturn + trioReturn) / totalInvest) * 100 : 0;
 
-            return { 
-                rec, raceCount, 
-                winInvest, winROI, winHits, winBetRaces, 
-                wideInvest, wideROI, wideHits, wideBetRaces, 
-                trioInvest, trioROI, trioHits, trioBetRaces, 
-                totalInvest, totalROI 
-            };
+            return { rec, raceCount, winInvest, winROI, winHits, winBetRaces, trioInvest, trioROI, trioHits, trioBetRaces, totalInvest, totalROI };
         }).filter(s => s.raceCount > 0);
     }
 
@@ -929,9 +851,6 @@ document.addEventListener('DOMContentLoaded', () => {
                             <th>単勝投資</th>
                             <th>単勝的中率</th>
                             <th>単勝回収率</th>
-                            <th>ワイド投資</th>
-                            <th>ワイド的中率</th>
-                            <th>ワイド回収率</th>
                             <th>三連複投資</th>
                             <th>三連複的中率</th>
                             <th>三連複回収率</th>
@@ -947,9 +866,6 @@ document.addEventListener('DOMContentLoaded', () => {
                                 <td>${s.winInvest.toLocaleString()}円</td>
                                 <td>${fmtHitRate(s.winHits, s.winBetRaces)}</td>
                                 <td class="${s.winROI >= 100 ? 'text-green-400 font-bold' : ''}">${s.winROI.toFixed(1)}%</td>
-                                <td>${s.wideInvest.toLocaleString()}円</td>
-                                <td>${fmtHitRate(s.wideHits, s.wideBetRaces)}</td>
-                                <td class="${s.wideROI >= 100 ? 'text-green-400 font-bold' : ''}">${s.wideROI.toFixed(1)}%</td>
                                 <td>${s.trioInvest.toLocaleString()}円</td>
                                 <td>${fmtHitRate(s.trioHits, s.trioBetRaces)}</td>
                                 <td class="${s.trioROI >= 100 ? 'text-green-400 font-bold' : ''}">${s.trioROI.toFixed(1)}%</td>
@@ -1065,10 +981,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // 推奨度別成績
             const recommendationPerformance = {
-                "SSS": { sampleRaces: 0, winRate: 0.0, winRecovery: 0.0, wideRate: 0.0, wideRecovery: 0.0, trioRate: 0.0, trioRecovery: 0.0, totalRecovery: 0.0 },
-                "SS": { sampleRaces: 0, winRate: 0.0, winRecovery: 0.0, wideRate: 0.0, wideRecovery: 0.0, trioRate: 0.0, trioRecovery: 0.0, totalRecovery: 0.0 },
-                "S": { sampleRaces: 0, winRate: 0.0, winRecovery: 0.0, wideRate: 0.0, wideRecovery: 0.0, trioRate: 0.0, trioRecovery: 0.0, totalRecovery: 0.0 },
-                "Low": { sampleRaces: 0, winRate: 0.0, winRecovery: 0.0, wideRate: 0.0, wideRecovery: 0.0, trioRate: 0.0, trioRecovery: 0.0, totalRecovery: 0.0 }
+                "SSS": { sampleRaces: 0, hitRate: 0.0, recoveryRate: 0.0 },
+                "SS": { sampleRaces: 0, hitRate: 0.0, recoveryRate: 0.0 },
+                "S": { sampleRaces: 0, hitRate: 0.0, recoveryRate: 0.0 },
+                "Low": { sampleRaces: 0, hitRate: 0.0, recoveryRate: 0.0 }
             };
             
             if (recStats && Array.isArray(recStats)) {
@@ -1077,13 +993,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (rec && recommendationPerformance[rec]) {
                         recommendationPerformance[rec] = {
                             sampleRaces: rs?.raceCount || 0,
-                            winRate: rs?.winBetRaces > 0 ? (rs.winHits / rs.winBetRaces) * 100 : 0.0,
-                            winRecovery: rs?.winROI || 0.0,
-                            wideRate: rs?.wideBetRaces > 0 ? (rs.wideHits / rs.wideBetRaces) * 100 : 0.0,
-                            wideRecovery: rs?.wideROI || 0.0,
-                            trioRate: rs?.trioBetRaces > 0 ? (rs.trioHits / rs.trioBetRaces) * 100 : 0.0,
-                            trioRecovery: rs?.trioROI || 0.0,
-                            totalRecovery: rs?.totalROI || 0.0
+                            hitRate: rs?.totalBetRaces > 0 ? (rs.totalHits / rs.totalBetRaces) * 100 : 0.0,
+                            recoveryRate: rs?.totalROI || 0.0
                         };
                     }
                 });
@@ -2252,11 +2163,11 @@ document.addEventListener('DOMContentLoaded', () => {
 ## 3. 推奨度別パフォーマンス（シミュレーション: SSS/SS/S/Low）
 `;
         const fmtHitRateMd = (hits, total) => total > 0 ? `${(hits / total * 100).toFixed(1)}% (${hits}/${total})` : '-';
-        md += `| 推奨度 | レース数 | 単勝投資 | 単勝的中率 | 単勝回収率 | ワイド投資 | ワイド的中率 | ワイド回収率 | 三連複投資 | 三連複的中率 | 三連複回収率 | 合算投資 | 合算回収率 |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|
+        md += `| 推奨度 | レース数 | 単勝投資 | 単勝的中率 | 単勝回収率 | 三連複投資 | 三連複的中率 | 三連複回収率 | 合算投資 | 合算回収率 |
+|---|---|---|---|---|---|---|---|---|---|
 `;
         recStats.forEach(s => {
-            md += `| ${s.rec} | ${s.raceCount} | ${s.winInvest.toLocaleString()}円 | ${fmtHitRateMd(s.winHits, s.winBetRaces)} | ${s.winROI.toFixed(1)}% | ${s.wideInvest.toLocaleString()}円 | ${fmtHitRateMd(s.wideHits, s.wideBetRaces)} | ${s.wideROI.toFixed(1)}% | ${s.trioInvest.toLocaleString()}円 | ${fmtHitRateMd(s.trioHits, s.trioBetRaces)} | ${s.trioROI.toFixed(1)}% | ${s.totalInvest.toLocaleString()}円 | ${s.totalROI.toFixed(1)}% |
+            md += `| ${s.rec} | ${s.raceCount} | ${s.winInvest.toLocaleString()}円 | ${fmtHitRateMd(s.winHits, s.winBetRaces)} | ${s.winROI.toFixed(1)}% | ${s.trioInvest.toLocaleString()}円 | ${fmtHitRateMd(s.trioHits, s.trioBetRaces)} | ${s.trioROI.toFixed(1)}% | ${s.totalInvest.toLocaleString()}円 | ${s.totalROI.toFixed(1)}% |
 `;
         });
 
