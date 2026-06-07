@@ -994,7 +994,13 @@ document.addEventListener('DOMContentLoaded', () => {
                         recommendationPerformance[rec] = {
                             sampleRaces: rs?.raceCount || 0,
                             hitRate: rs?.totalBetRaces > 0 ? (rs.totalHits / rs.totalBetRaces) * 100 : 0.0,
-                            recoveryRate: rs?.totalROI || 0.0
+                            recoveryRate: rs?.totalROI || 0.0,
+                            winRecoveryRate: rs?.winROI || 0.0,
+                            wideRecoveryRate: 0.0, // ワイドは現在シミュレーション対象外のため0固定
+                            trifectaRecoveryRate: rs?.trioROI || 0.0,
+                            winHitRate: rs?.winBetRaces > 0 ? (rs.winHits / rs.winBetRaces) * 100 : 0.0,
+                            wideHitRate: 0.0,
+                            trifectaHitRate: rs?.trioBetRaces > 0 ? (rs.trioHits / rs.trioBetRaces) * 100 : 0.0
                         };
                     }
                 });
