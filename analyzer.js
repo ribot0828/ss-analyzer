@@ -308,12 +308,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    const WIN_CORE_CLASSES = ['X', 'B1', 'D1', 'B2', 'B3', 'A2', 'A3'];
+    const WIN_CORE_CLASSES = ['A3', 'B1', 'B2', 'X', 'D1', 'B3', 'A2'];
     const PLACE_CORE_CLASSES_FULL = ['S0', 'S1', 'S2', 'A0', 'B0+', 'A1', 'B0'];
     const AXIS_CLASSES = ['S0', 'S1', 'S2', 'A0', 'B0+', 'A1', 'B0'];
-    const WIN_PRIORITY = ['A3', 'B2', 'A2', 'B1', 'B3', 'D1', 'X'];
+    const WIN_PRIORITY = ['A3', 'A2', 'B1', 'B3', 'B2', 'D1', 'X', 'B0+'];
     const TRIO_ROW2_DEFENSE = ['S0', 'S1', 'S2', 'A0', 'B0+', 'A1', 'B0'];
-    const TRIO_ROW2_ATTACK = ['A3', 'B2', 'A2', 'B1', 'D1', 'B3', 'X'];
+    const TRIO_ROW2_ATTACK = ['A3', 'B1', 'B2', 'X', 'D1', 'B3', 'A2'];
 
     function enrichHorses(horses) {
         let totalScore = 0;
@@ -421,10 +421,10 @@ document.addEventListener('DOMContentLoaded', () => {
         
         // 優先順位の定数定義（念のため関数内に明記）
         const PLACE_CORE_CLASSES = ['S0', 'S1', 'S2', 'A0', 'B0+', 'A1', 'B0'];
-        const WIN_CORE_CLASSES = ['X', 'B1', 'D1', 'B2', 'B3', 'A2', 'A3'];
-        const WIN_PRIORITY_LOCAL = ['A3', 'B2', 'A2', 'B1', 'B3', 'D1', 'X'];
+        const WIN_CORE_CLASSES = ['A3', 'B1', 'B2', 'X', 'D1', 'B3', 'A2'];
+        const WIN_PRIORITY_LOCAL = ['A3', 'A2', 'B1', 'B3', 'B2', 'D1', 'X', 'B0+'];
         const TRIO_ROW2_DEFENSE_LOCAL = ['S0', 'S1', 'S2', 'A0', 'B0+', 'A1', 'B0'];
-        const TRIO_ROW2_ATTACK_LOCAL = ['A3', 'B2', 'A2', 'B1', 'D1', 'B3', 'X'];
+        const TRIO_ROW2_ATTACK_LOCAL = ['A3', 'B1', 'B2', 'X', 'D1', 'B3', 'A2'];
 
         const hasAxis = classes.some(c => PLACE_CORE_CLASSES.includes(c));
         const isGraded = raceHorses[0] && ((raceHorses[0]["グレード・頭数"] || "").includes("G") || (raceHorses[0]["グレード・頭数"] || "").includes("重賞"));
@@ -544,24 +544,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 // 1. 2列目の全馬（ソート不要、そのまま追加）
                 addToRow3(row2);
                 
-                // 2. Win-Core系の全馬（優先順位順にattackSort適用）
-                for (let c of TRIO_ROW2_ATTACK_LOCAL) {
-                    let cands = raceHorses.filter(h => h !== axisHorse && (h["最終確定クラス"] || h["購入時クラス"] || "").trim() === c);
-                    if (cands.length > 0) {
-                        cands.sort(attackSort);
-                        addToRow3(cands);
-                    }
-                }
-
-                // 3. 評価Sの全馬（sortDefense適用）
+                // 2. 評価Sの全馬（sortDefense適用）
                 let sCands = raceHorses.filter(h => h !== axisHorse && (h["評価"] || "").toUpperCase().trim() === 'S');
                 sCands.sort(sortDefense);
                 addToRow3(sCands);
-
-                // 4. Place-Core系の全馬（sortDefense適用）
+                
+                // 3. Place-Core系の全馬（sortDefense適用）
                 let placeCoreCands = raceHorses.filter(h => h !== axisHorse && PLACE_CORE_CLASSES.includes((h["最終確定クラス"] || h["購入時クラス"] || "").trim()));
                 placeCoreCands.sort(sortDefense);
                 addToRow3(placeCoreCands);
+
+                // 4. Win-Core系の全馬（attackSort適用）
+                let winCoreCands = raceHorses.filter(h => h !== axisHorse && WIN_CORE_CLASSES.includes((h["最終確定クラス"] || h["購入時クラス"] || "").trim()));
+                winCoreCands.sort(attackSort);
+                addToRow3(winCoreCands);
 
                 // 5. Nクラスの馬（sortN適用）
                 let nCands = raceHorses.filter(h => h !== axisHorse && ['N', ''].includes((h["最終確定クラス"] || h["購入時クラス"] || "").trim()));
