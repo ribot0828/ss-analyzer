@@ -600,23 +600,46 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
 
+        let winInvest = 0;
         let winReturn = 0;
+        let amberFailInvest = 0;
         let amberFailReturn = 0;
 
-        const calcReturn = (h) => {
+        const getUnits = (cls) => {
+            if (cls === 'A3') return 3;
+            if (cls === 'B2') return 2;
+            return 1;
+        };
+
+        finalWinBets.forEach(h => {
+            const cls = (h["最終確定クラス"] || h["購入時クラス"] || "").trim();
+            const units = getUnits(cls);
+            winInvest += units * 100; // 1U = 100円計算
+
             if (parseInt(h["着順"]) === 1) {
                 const umaban = h["馬番"];
                 if (actualWinPayoutMap[umaban]) {
-                    return actualWinPayoutMap[umaban];
+                    winReturn += actualWinPayoutMap[umaban] * units;
                 } else {
-                    return (parseFloat(h["最終確定オッズ"]) || parseFloat(h["購入時オッズ"]) || 0) * 100;
+                    winReturn += (parseFloat(h["最終確定オッズ"]) || parseFloat(h["購入時オッズ"]) || 0) * 100 * units;
                 }
             }
-            return 0;
-        };
+        });
 
-        finalWinBets.forEach(h => { winReturn += calcReturn(h); });
-        amberFailBets.forEach(h => { amberFailReturn += calcReturn(h); });
+        amberFailBets.forEach(h => {
+            const cls = (h["最終確定クラス"] || h["購入時クラス"] || "").trim();
+            const units = getUnits(cls);
+            amberFailInvest += units * 100;
+
+            if (parseInt(h["着順"]) === 1) {
+                const umaban = h["馬番"];
+                if (actualWinPayoutMap[umaban]) {
+                    amberFailReturn += actualWinPayoutMap[umaban] * units;
+                } else {
+                    amberFailReturn += (parseFloat(h["最終確定オッズ"]) || parseFloat(h["購入時オッズ"]) || 0) * 100 * units;
+                }
+            }
+        });
 
         let trioReturn = 0;
         let trioHit = false;
@@ -659,9 +682,9 @@ document.addEventListener('DOMContentLoaded', () => {
             row3: row3Array,
             finalWinBets: finalWinBets,
             amberFailBets: amberFailBets,
-            winInvest: finalWinBets.length * 100,
+            winInvest: winInvest,
             winReturn: winReturn,
-            amberFailInvest: amberFailBets.length * 100,
+            amberFailInvest: amberFailInvest,
             amberFailReturn: amberFailReturn,
             trioInvest: isLegacyRace ? 0 : finalTrioCombos.length * 100,
             trioReturn: trioReturn
