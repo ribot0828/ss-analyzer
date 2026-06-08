@@ -558,11 +558,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 }
 
-                // 4. Nクラスの馬（sortN適用）
-                let nCands = raceHorses.filter(h => h !== axisHorse && ['N', ''].includes((h["最終確定クラス"] || h["購入時クラス"] || "").trim()));
-                nCands.sort(sortN);
-                addToRow3(nCands);
-
                 row3Array = row3.slice(0, 10); // 最大10頭
 
                 // 組み合わせの生成
