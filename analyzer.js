@@ -313,7 +313,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const AXIS_CLASSES = ['S0', 'S1', 'S2', 'A0', 'B0+', 'A1', 'B0'];
     const WIN_PRIORITY = ['A3', 'B2', 'A2', 'B1', 'B3', 'D1', 'X'];
     const TRIO_ROW2_DEFENSE = ['S0', 'S1', 'S2', 'A0', 'B0+', 'A1', 'B0'];
-    const TRIO_ROW2_ATTACK = ['A3', 'B2', 'A2', 'B1', 'D1', 'B3', 'X'];
+    const TRIO_ROW2_ATTACK = ['A3', 'B2', 'A2', 'B1', 'B3'];
 
     function enrichHorses(horses) {
         let totalScore = 0;
@@ -424,7 +424,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const WIN_CORE_CLASSES = ['X', 'B1', 'D1', 'B2', 'B3', 'A2', 'A3'];
         const WIN_PRIORITY_LOCAL = ['A3', 'B2', 'A2', 'B1', 'B3', 'D1', 'X'];
         const TRIO_ROW2_DEFENSE_LOCAL = ['S0', 'S1', 'S2', 'A0', 'B0+', 'A1', 'B0'];
-        const TRIO_ROW2_ATTACK_LOCAL = ['A3', 'B2', 'A2', 'B1', 'D1', 'B3', 'X'];
+        const TRIO_ROW2_ATTACK_LOCAL = ['A3', 'B2', 'A2', 'B1', 'B3'];
 
         const hasAxis = classes.some(c => PLACE_CORE_CLASSES.includes(c));
         const isGraded = raceHorses[0] && ((raceHorses[0]["グレード・頭数"] || "").includes("G") || (raceHorses[0]["グレード・頭数"] || "").includes("重賞"));
@@ -498,15 +498,15 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             if (axisHorse) {
-                // 2列目防衛 (優先順位順に最大1枚)
+                // 2列目防衛 (優先順位順に最大2枚)
                 let defCount = 0;
                 for (let c of TRIO_ROW2_DEFENSE_LOCAL) {
-                    if (defCount >= 1) break;
+                    if (defCount >= 2) break;
                     let cands = raceHorses.filter(h => h !== axisHorse && (h["最終確定クラス"] || h["購入時クラス"] || "").trim() === c);
                     if (cands.length > 0) {
                         cands.sort(pureEvSort); // 新防御ソート
                         for (let h of cands) {
-                            if (defCount >= 1) break;
+                            if (defCount >= 2) break;
                             if (!row2.includes(h)) {
                                 row2.push(h);
                                 defCount++;
@@ -515,15 +515,15 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 }
 
-                // 2列目攻撃 (優先順位順に最大2枚)
+                // 2列目攻撃 (優先順位順に最大1枚)
                 let atkCount = 0;
                 for (let c of TRIO_ROW2_ATTACK_LOCAL) {
-                    if (atkCount >= 2) break;
+                    if (atkCount >= 1) break;
                     let cands = raceHorses.filter(h => h !== axisHorse && (h["最終確定クラス"] || h["購入時クラス"] || "").trim() === c);
                     if (cands.length > 0) {
                         cands.sort(attackSort); // 攻撃ソート
                         for (let h of cands) {
-                            if (atkCount >= 2) break;
+                            if (atkCount >= 1) break;
                             if (!row2.includes(h)) {
                                 row2.push(h);
                                 atkCount++;
@@ -544,32 +544,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 // 1. 2列目の全馬（ソート不要、そのまま追加）
                 addToRow3(row2);
                 
-                // 2. Place-Core系の全馬（sortDefense適用）
-                let placeCoreCands = raceHorses.filter(h => h !== axisHorse && PLACE_CORE_CLASSES.includes((h["最終確定クラス"] || h["購入時クラス"] || "").trim()));
-                placeCoreCands.sort(sortDefense);
-                addToRow3(placeCoreCands);
-
-                // 3. Win-Core系の全馬（attackSort適用）
-                let winCoreCands = raceHorses.filter(h => h !== axisHorse && WIN_CORE_CLASSES.includes((h["最終確定クラス"] || h["購入時クラス"] || "").trim()));
-                winCoreCands.sort(attackSort);
-                addToRow3(winCoreCands);
-
-                // 4. Nクラスの馬（条件付き追加: 単勝オッズ>=15.0 ＆ 評価A/B/D）
-                let nCands = raceHorses.filter(h => {
+                // 2. 評価S, A, Bの全馬（sortDefense適用）
+                // ※X, D1, C, Nクラスは除外するため、純粋にS, A, B評価の馬のみを追加
+                let sabCands = raceHorses.filter(h => {
                     if (h === axisHorse) return false;
-                    const isN = ['N', ''].includes((h["最終確定クラス"] || h["購入時クラス"] || "").trim());
-                    if (!isN) return false;
-                    
-                    const odds = parseFloat(h["最終確定オッズ"]) || parseFloat(h["購入時オッズ"]) || 0;
                     const evalRank = (h["評価"] || "").toUpperCase().trim();
-                    const isValidEval = ['A', 'B', 'D'].includes(evalRank);
-                    
-                    return odds >= 15.0 && isValidEval;
+                    return ['S', 'A', 'B'].includes(evalRank);
                 });
-                nCands.sort(sortN);
-                addToRow3(nCands);
+                sabCands.sort(sortDefense);
+                addToRow3(sabCands);
 
-                row3Array = row3.slice(0, 6); // 最大6頭
+                row3Array = row3; // 評価S,A,Bのみなので点数は自然と絞られる
 
                 // 組み合わせの生成
                 row2.forEach(h2 => {
