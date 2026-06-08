@@ -544,7 +544,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 // 1. 2列目の全馬（ソート不要、そのまま追加）
                 addToRow3(row2);
                 
-                // 2. Place-Core系の全馬（sortDefense適用）
+                // 2. 評価Sの全馬（ただしNクラスは除外 / sortDefense）
+                let sRanked = raceHorses.filter(h => h !== axisHorse && (h["評価"] || "").toUpperCase().trim() === 'S' && (h["最終確定クラス"] || h["購入時クラス"] || "").trim() !== 'N');
+                sRanked.sort(sortDefense);
+                addToRow3(sRanked);
+                
+                // 3. Place-Core系の全馬（sortDefense適用）
                 let placeCoreCands = raceHorses.filter(h => h !== axisHorse && PLACE_CORE_CLASSES.includes((h["最終確定クラス"] || h["購入時クラス"] || "").trim()));
                 placeCoreCands.sort(sortDefense);
                 addToRow3(placeCoreCands);
