@@ -361,7 +361,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 else if (r === 'B' && ev >= 1.100 && ev <= 1.350) cls = 'B1';
                 else if (r === 'B' && ev >= 2.000 && ev <= 4.500) cls = 'B3';
                 else if (r === 'A' && ev >= 1.000 && ev <= 1.250) cls = 'A2';
-                else if (r === 'A' && ev >= 1.500 && ev <= 1.999) cls = 'A3';
+                else if (r === 'A' && ev >= 1.500 && ev <= 1.699) cls = 'A3';
                 else if (r === 'D' && ev >= 1.300 && ev <= 1.799) cls = 'D1';
             }
 
