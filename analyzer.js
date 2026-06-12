@@ -577,11 +577,12 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
-        // --- Legacy自己検算: 2026年1月〜3月 または 日付が"Legacy"のレースは単勝払戻をオッズから再計算 ---
+        // --- Legacy自己検算: 2026-04-11より前 または 日付が"Legacy"のレースは単勝払戻をオッズから再計算 ---
         const isLegacyRace = raceHorses[0] && (() => {
             const dateStr = (raceHorses[0]["日付"] || "").trim();
-            if (dateStr === "Legacy") return true;
-            if (dateStr.startsWith("2026-01") || dateStr.startsWith("2026-02") || dateStr.startsWith("2026-03")) return true;
+            if (dateStr === "Legacy" || dateStr === "") return true;
+            // 2026-04-11より前の全日付をLegacy扱い
+            if (dateStr < "2026-04-11") return true;
             return false;
         })();
 
