@@ -480,7 +480,7 @@ document.addEventListener('DOMContentLoaded', () => {
         amberFailBets = allWinCandidates.slice(0, 2).filter(h => !h.amberPass);
 
         // 【三連複シミュレーション買い目選定】
-        let finalTrioCombos = [];
+        let finalTrioCombos = new Set();
         let axisHorse = null;
         let row2 = [];
         let row3 = [];
@@ -570,7 +570,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     row3Array.forEach(h3 => {
                         if (h2 !== h3 && h2 !== axisHorse && h3 !== axisHorse) {
                             const trio = [parseInt(axisHorse["馬番"]), parseInt(h2["馬番"]), parseInt(h3["馬番"])].sort((a,b) => a-b).join('-');
-                            if (!finalTrioCombos.includes(trio)) finalTrioCombos.push(trio);
+                            finalTrioCombos.add(trio);
                         }
                     });
                 });
@@ -594,7 +594,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (parseInt(h["着順"]) === 1) {
                     const odds = parseFloat(h["最終確定オッズ"]) || parseFloat(h["購入時オッズ"]) || 0;
                     if (odds > 0) {
-                        actualWinPayoutMap[h["馬番"]] = Math.floor(odds * 100);
+                        actualWinPayoutMap[h["馬番"]] = Math.round(odds * 10) * 10;
                     }
                 }
                 const tVal = parseFloat(h["三連複払戻"]);
@@ -672,11 +672,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 };
                 const combos = getCombinations(winners, 3);
                 for (let c of combos) {
-                    if (finalTrioCombos.includes(c.join('-'))) {
+                    if (finalTrioCombos.has(c.join('-'))) {
                         trioHit = true;
-                        break;
+                        break; // 的中の重複カウント防止：1回のみで確定
                     }
                 }
+                
+                // ※三連単計算の影響分離: 三連単払戻(h["三連単払戻"])は一切参照・利用せず、
+                // 独立して取得した三連複払戻(actualTrioPayout)のみを加算しています。
                 if (trioHit) trioReturn = actualTrioPayout;
             }
         }
@@ -696,7 +699,7 @@ document.addEventListener('DOMContentLoaded', () => {
             winReturn: winReturn,
             amberFailInvest: amberFailInvest,
             amberFailReturn: amberFailReturn,
-            trioInvest: isLegacyRace ? 0 : finalTrioCombos.length * 100,
+            trioInvest: isLegacyRace ? 0 : finalTrioCombos.size * 100,
             trioReturn: trioReturn
         };
     }
