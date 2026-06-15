@@ -616,23 +616,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const rec = determineRecommendation(raceHorses);
         const getUnits = (cls) => {
-            if (rec === 'SSS') {
-                if (cls === 'A3') return 6;
-                if (cls === 'B2') return 4;
-                return 2;
-            } else if (rec === 'SS') {
-                if (cls === 'A3') return 5;
-                if (cls === 'B2') return 3;
-                return 2;
-            } else if (rec === 'S') {
-                if (cls === 'A3') return 3;
-                if (cls === 'B2') return 2;
-                return 1;
-            } else { // Low
-                if (cls === 'A3') return 1;
-                if (cls === 'B2') return 1;
-                return 1;
+            if (cls === 'A3') {
+                if (rec === 'SSS') return 6;
+                if (rec === 'SS') return 5;
+                if (rec === 'S') return 4;
+                return 3; // Low
+            } else if (cls === 'B2') {
+                if (rec === 'SSS') return 4;
+                if (rec === 'SS') return 3;
+                if (rec === 'S') return 2;
+                return 2; // Low
+            } else if (cls === 'A2' || cls === 'B1') {
+                if (rec === 'SSS' || rec === 'SS') return 2;
+                if (rec === 'S') return 1;
+                return 1; // Low
+            } else if (cls === 'B3' || cls === 'D1' || cls === 'X') {
+                return 1; // Always 1U
             }
+            return 0;
         };
 
         finalWinBets.forEach(h => {
@@ -711,8 +712,8 @@ document.addEventListener('DOMContentLoaded', () => {
             winReturn: winReturn,
             amberFailInvest: amberFailInvest,
             amberFailReturn: amberFailReturn,
-            trioInvest: isLegacyRace ? 0 : finalTrioCombos.size * 100,
-            trioReturn: trioReturn
+            trioInvest: 0,
+            trioReturn: 0
         };
     }
 
