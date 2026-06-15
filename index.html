@@ -96,22 +96,38 @@
             </section>
 
             <!-- 2. Risk & Overall Dashboard -->
-            <section id="risk-dashboard" class="grid grid-cols-1 md:grid-cols-4 gap-4 hidden animate-fade">
+            <section id="risk-dashboard" class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-4 hidden animate-fade">
                 <div class="glass-panel text-center p-4 border-l-4 border-l-blue-500">
-                    <p class="text-xs text-slate-400 uppercase tracking-widest">総レース数</p>
-                    <p id="stat-race-count" class="text-2xl font-bold">-</p>
+                    <p class="text-[10px] text-slate-400 uppercase tracking-widest">総レース数</p>
+                    <p id="stat-race-count" class="text-xl font-bold">-</p>
                 </div>
                 <div class="glass-panel text-center p-4 border-l-4 border-l-green-500">
-                    <p class="text-xs text-slate-400 uppercase tracking-widest">全体回収率</p>
-                    <p id="stat-overall-roi" class="text-2xl font-bold">-</p>
+                    <p class="text-[10px] text-slate-400 uppercase tracking-widest">全体回収率(単+複)</p>
+                    <p id="stat-overall-roi" class="text-xl font-bold">-</p>
                 </div>
                 <div class="glass-panel text-center p-4 border-l-4 border-l-red-500">
-                    <p class="text-xs text-slate-400 uppercase tracking-widest">最大ドローダウン</p>
-                    <p id="stat-mdd" class="text-2xl font-bold">-</p>
+                    <p class="text-[10px] text-slate-400 uppercase tracking-widest">全体最大DD(円)</p>
+                    <p id="stat-mdd" class="text-xl font-bold">-</p>
                 </div>
                 <div class="glass-panel text-center p-4 border-l-4 border-l-purple-500">
-                    <p class="text-xs text-slate-400 uppercase tracking-widest">平均CLV (市場優位性)</p>
-                    <p id="stat-avg-clv" class="text-2xl font-bold">-</p>
+                    <p class="text-[10px] text-slate-400 uppercase tracking-widest">平均CLV</p>
+                    <p id="stat-avg-clv" class="text-xl font-bold">-</p>
+                </div>
+                <div class="glass-panel text-center p-4 border-l-4 border-l-emerald-400">
+                    <p class="text-[10px] text-slate-400 uppercase tracking-widest">単勝のみ全体回収率</p>
+                    <p id="stat-win-roi" class="text-xl font-bold">-</p>
+                </div>
+                <div class="glass-panel text-center p-4 border-l-4 border-l-rose-400">
+                    <p class="text-[10px] text-slate-400 uppercase tracking-widest">単勝最大DD(U)</p>
+                    <p id="stat-win-mdd" class="text-xl font-bold">-</p>
+                </div>
+                <div class="glass-panel text-center p-4 border-l-4 border-l-amber-400">
+                    <p class="text-[10px] text-slate-400 uppercase tracking-widest">Sharpe Ratio</p>
+                    <p id="stat-sharpe" class="text-xl font-bold">-</p>
+                </div>
+                <div class="glass-panel text-center p-4 border-l-4 border-l-slate-400">
+                    <p class="text-[10px] text-slate-400 uppercase tracking-widest">単勝最大連敗数</p>
+                    <p id="stat-losing-streak" class="text-xl font-bold">-</p>
                 </div>
             </section>
 
