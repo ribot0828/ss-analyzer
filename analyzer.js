@@ -721,25 +721,92 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function calculateRiskMetrics(simulatedRaces) {
-        let cumulative = 0;
-        let peak = 0;
-        let maxDD = 0;
-        let totalInvest = 0;
-        let totalReturn = 0;
         let clvTotal = 0;
         let clvCount = 0;
+        let totalInvest = 0;
+        let totalReturn = 0;
 
-        const sortedData = [...simulatedRaces].sort((a,b) => a.id.localeCompare(b.id));
+        // Sort properly by date then race id
+        const sortedData = [...simulatedRaces].sort((a,b) => {
+            const dateA = a.horses[0] ? (a.horses[0]["日付"] || "ZZZZ") : "ZZZZ";
+            const dateB = b.horses[0] ? (b.horses[0]["日付"] || "ZZZZ") : "ZZZZ";
+            if (dateA !== dateB) return dateA.localeCompare(dateB);
+            return a.id.localeCompare(b.id);
+        });
 
+        const winBetRaces = sortedData.filter(r => r.winInvest > 0);
+        let winTotalInvest = 0;
+        let winTotalReturn = 0;
+        
+        let cumulativeU = 0;
+        let hwmU = 0;
+        let maxDDU = 0;
+
+        const pnlUnits = [];
+        let currentLosingStreak = 0;
+        let maxLosingStreak = 0;
+        const allStreaks = [];
+
+        winBetRaces.forEach(r => {
+            winTotalInvest += r.winInvest;
+            winTotalReturn += r.winReturn;
+
+            const investU = r.winInvest / 100.0;
+            const returnU = r.winReturn / 100.0;
+            const pnlU = returnU - investU;
+            pnlUnits.push(pnlU);
+
+            cumulativeU += pnlU;
+            if (cumulativeU > hwmU) hwmU = cumulativeU;
+            const ddU = hwmU - cumulativeU;
+            if (ddU > maxDDU) maxDDU = ddU;
+
+            if (r.winReturn <= 0) {
+                currentLosingStreak++;
+            } else {
+                if (currentLosingStreak > 0) {
+                    allStreaks.push(currentLosingStreak);
+                }
+                currentLosingStreak = 0;
+            }
+            if (currentLosingStreak > maxLosingStreak) maxLosingStreak = currentLosingStreak;
+        });
+
+        if (currentLosingStreak > 0) allStreaks.push(currentLosingStreak);
+
+        let meanPnl = 0;
+        let sharpe = 0;
+        if (pnlUnits.length >= 2) {
+            meanPnl = pnlUnits.reduce((a, b) => a + b, 0) / pnlUnits.length;
+            const variance = pnlUnits.reduce((a, b) => a + Math.pow(b - meanPnl, 2), 0) / (pnlUnits.length - 1);
+            const stdev = Math.sqrt(variance);
+            if (stdev > 0) sharpe = meanPnl / stdev;
+        } else if (pnlUnits.length === 1) {
+            meanPnl = pnlUnits[0];
+        }
+
+        const dist = { "1-4": 0, "5-9": 0, "10-14": 0, "15-19": 0, "20+": 0 };
+        allStreaks.forEach(s => {
+            if (s <= 4) dist["1-4"]++;
+            else if (s <= 9) dist["5-9"]++;
+            else if (s <= 14) dist["10-14"]++;
+            else if (s <= 19) dist["15-19"]++;
+            else dist["20+"]++;
+        });
+
+        // Original overall calculation
+        let oldCumulative = 0;
+        let oldPeak = 0;
+        let oldMaxDD = 0;
         sortedData.forEach(r => {
             const invest = r.winInvest + r.trioInvest;
             const p = r.winReturn + r.trioReturn;
             totalInvest += invest;
             totalReturn += p;
-            cumulative += (p - invest);
-            if (cumulative > peak) peak = cumulative;
-            const dd = peak - cumulative;
-            if (dd > maxDD) maxDD = dd;
+            oldCumulative += (p - invest);
+            if (oldCumulative > oldPeak) oldPeak = oldCumulative;
+            const dd = oldPeak - oldCumulative;
+            if (dd > oldMaxDD) oldMaxDD = dd;
 
             r.horses.forEach(h => {
                 const fo = parseFloat(h["最終確定オッズ"]);
@@ -752,9 +819,16 @@ document.addEventListener('DOMContentLoaded', () => {
             raceCount: simulatedRaces.length,
             horseCount: simulatedRaces.reduce((acc, r) => acc + r.horses.length, 0),
             roi: totalInvest > 0 ? (totalReturn / totalInvest) * 100 : 0,
-            mdd: maxDD,
-            mddRate: totalInvest > 0 ? (maxDD / totalInvest) * 100 : 0,
-            avgClv: clvCount > 0 ? clvTotal / clvCount : 1.0
+            mdd: oldMaxDD,
+            mddRate: totalInvest > 0 ? (oldMaxDD / totalInvest) * 100 : 0,
+            avgClv: clvCount > 0 ? clvTotal / clvCount : 1.0,
+            
+            // Financial & Risk Metrics
+            overallWinRecoveryRate: winTotalInvest > 0 ? (winTotalReturn / winTotalInvest) * 100 : 0,
+            maxDrawdownUnits: maxDDU,
+            sharpeRatio: sharpe,
+            maxWinLosingStreak: maxLosingStreak,
+            losingStreakDistribution: dist
         };
     }
 
@@ -1021,7 +1095,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         
         try {
-            const { rowsWithRank, classStats, amberStats, recStats, simulatedRaces } = window.latestSimData;
+            const { rowsWithRank, classStats, riskStats, amberStats, recStats, simulatedRaces } = window.latestSimData;
             const totalRaces = parseInt(document.getElementById('stat-race-count')?.textContent || '0') || 0;
             const overallRoi = parseFloat(document.getElementById('stat-overall-roi')?.textContent || '0') || 0;
 
@@ -1275,7 +1349,12 @@ document.addEventListener('DOMContentLoaded', () => {
             const jsonPayload = {
                 summary: {
                     totalRaces: totalRaces,
-                    overallRecoveryRate: overallRoi
+                    overallRecoveryRate: overallRoi,
+                    overallWinRecoveryRate: riskStats?.overallWinRecoveryRate || 0,
+                    maxDrawdownUnits: riskStats?.maxDrawdownUnits || 0,
+                    sharpeRatio: riskStats?.sharpeRatio || 0,
+                    maxWinLosingStreak: riskStats?.maxWinLosingStreak || 0,
+                    losingStreakDistribution: riskStats?.losingStreakDistribution || {}
                 },
                 evaluationPerformance: evaluationPerformance,
                 recommendationPerformance: recommendationPerformance,
@@ -1512,6 +1591,18 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('stat-overall-roi').textContent = `${s.roi.toFixed(1)}%`;
         document.getElementById('stat-mdd').textContent = `-${s.mdd.toLocaleString()}円 (${s.mddRate.toFixed(1)}%)`;
         document.getElementById('stat-avg-clv').textContent = s.avgClv.toFixed(3);
+        
+        const winRoiEl = document.getElementById('stat-win-roi');
+        if(winRoiEl) winRoiEl.textContent = `${s.overallWinRecoveryRate.toFixed(1)}%`;
+        
+        const winMddEl = document.getElementById('stat-win-mdd');
+        if(winMddEl) winMddEl.textContent = `-${s.maxDrawdownUnits.toFixed(1)}U`;
+        
+        const sharpeEl = document.getElementById('stat-sharpe');
+        if(sharpeEl) sharpeEl.textContent = s.sharpeRatio.toFixed(4);
+        
+        const streakEl = document.getElementById('stat-losing-streak');
+        if(streakEl) streakEl.textContent = `${s.maxWinLosingStreak}連敗`;
     }
 
     function renderClassTable(stats) {
