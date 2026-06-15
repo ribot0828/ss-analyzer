@@ -188,6 +188,32 @@
                     <div id="recommendationResultArea"></div>
                 </section>
 
+                <!-- Amber Audit Validation Report -->
+                <section class="glass-panel animate-fade">
+                    <h3 class="text-lg font-semibold mb-6">🛡️ Amber Audit（全馬理論）検証レポート</h3>
+                    <p class="text-xs text-slate-400 mb-4">期待値フィルターが実際にどれだけの「無駄な不的中・トリガミ」を防いでいるかを検証します。</p>
+                    <div id="amberReportArea"></div>
+                </section>
+
+                <!-- Advanced Risk Analysis -->
+                <section class="glass-panel animate-fade">
+                    <h3 class="text-lg font-semibold mb-6">📉 アドバンスド・リスク評価 (単勝専用)</h3>
+                    
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                        <div>
+                            <h4 class="text-md font-bold text-slate-300 mb-3 border-b border-slate-700 pb-2">⑤ 連敗確率分布</h4>
+                            <div id="streakDistributionArea" class="font-mono text-sm text-slate-300 leading-relaxed bg-slate-900 p-4 rounded-lg">
+                                <!-- Rendered by JS -->
+                            </div>
+                        </div>
+                        <div>
+                            <h4 class="text-md font-bold text-slate-300 mb-3 border-b border-slate-700 pb-2">⑥ モンテカルロ・シミュレーション (10,000回)</h4>
+                            <div id="monteCarloArea" class="font-mono text-sm text-slate-300 leading-relaxed bg-slate-900 p-4 rounded-lg">
+                                <!-- Rendered by JS -->
+                            </div>
+                        </div>
+                    </div>
+                </section>
 
                 <!-- Tarareba Simulator (The Backtester) -->
                 <section class="glass-panel border border-orange-500/30">

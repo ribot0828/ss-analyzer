@@ -270,9 +270,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const recStats = calculateRecommendationStats(simulatedRaces);
             renderRecommendationTable(recStats);
+            let amberStats = [];
+            try {
+                amberStats = calculateAmberStats(simulatedRaces);
+                renderAmberReport(amberStats);
+            } catch (e) {
+                console.error("Amber Report rendering error:", e);
+            }
 
-            // Amber Report removed
-
+            renderRiskAnalysisDetails(riskStats);
             drawEquityCurve(simulatedRaces);
 
             initRankEvTabs(rowsWithRank);
@@ -284,8 +290,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const md = generateUltimateMarkdown(riskStats, classStats, recStats, outliers, simulatedRaces);
             geminiOutput.value = md;
 
-            // JSONエクスポートデータの保持
-            window.latestSimData = { rowsWithRank, riskStats, classStats, recStats, simulatedRaces };
+            window.latestSimData = { rowsWithRank, riskStats, classStats, amberStats, recStats, simulatedRaces };
 
             const jsonBtn = document.getElementById('downloadJsonBtn');
             if (jsonBtn) jsonBtn.classList.remove('hidden');
@@ -359,9 +364,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 else if (r === 'D' && ev >= 1.300 && ev <= 1.799) cls = 'D1';
             }
 
-            // Amber logic removed
+            let mao = 999;
+            if (winRate > 0) {
+                if (['S0','S1','S2','A0','B0+','A1','B0'].includes(cls)) mao = 0.50 / winRate;
+                else if (['B1', 'B2', 'B3', 'A2', 'A3'].includes(cls)) mao = 0.90 / winRate;
+                else if (cls === 'X') mao = 3.00 / winRate;
+                else if (cls === 'D1') mao = 1.00 / winRate;
+            }
 
-            
+            let amberPass = false;
+            if (cls === 'X' || cls === 'D1') {
+                amberPass = h.usedOdds >= mao;
+            } else if (['S0','S1','S2','A0','B0+','A1','B0','B1','B2','B3','A2', 'A3'].includes(cls)) {
+                amberPass = h.usedOdds >= (mao * 1.2);
+            }
+            h.amberPass = amberPass;
             // 後続のシミュレーションがそのまま動くようにCSVの値を強制上書き
             h["最終確定クラス"] = cls;
             h["購入時クラス"] = cls;
@@ -433,8 +450,9 @@ document.addEventListener('DOMContentLoaded', () => {
             return evA - evB;
         };
 
-        // 【単勝シミュレーション馬選定】
+        // 【単勝シミュレーション馬選定とAmber検証用グループ分け】
         let finalWinBets = [];
+        let amberFailBets = [];
         
         let allWinCandidates = [];
         for (let clsName of WIN_PRIORITY_LOCAL) {
@@ -450,10 +468,14 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
+        // 1. グループA：Amber通過（実購入）
         for (let h of allWinCandidates) {
             if (finalWinBets.length >= 2) break;
-            finalWinBets.push(h);
+            if (h.amberPass) finalWinBets.push(h);
         }
+
+        // 2. グループB：Amber見送り（回避した罠: Amber無視で上位2頭に入るはずだったが弾かれた馬）
+        amberFailBets = allWinCandidates.slice(0, 2).filter(h => !h.amberPass);
 
         // 【三連複シミュレーション買い目選定】
         let finalTrioCombos = new Set();
@@ -589,6 +611,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         let winInvest = 0;
         let winReturn = 0;
+        let amberFailInvest = 0;
+        let amberFailReturn = 0;
 
         const rec = determineRecommendation(raceHorses);
         const getUnits = (cls) => {
@@ -625,9 +649,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
         });
+        amberFailBets.forEach(h => {
+            const cls = (h["最終確定クラス"] || h["購入時クラス"] || "").trim();
+            const units = getUnits(cls);
+            amberFailInvest += units * 100;
 
-        // Amber logic removed
-
+            if (parseInt(h["着順"]) === 1) {
+                const umaban = h["馬番"];
+                if (actualWinPayoutMap[umaban]) {
+                    amberFailReturn += actualWinPayoutMap[umaban] * units;
+                } else {
+                    amberFailReturn += (parseFloat(h["最終確定オッズ"]) || parseFloat(h["購入時オッズ"]) || 0) * 100 * units;
+                }
+            }
+        });
         let trioReturn = 0;
         let trioHit = false;
 
@@ -671,8 +706,11 @@ document.addEventListener('DOMContentLoaded', () => {
             row2: row2,
             row3: row3Array,
             finalWinBets: finalWinBets,
+            amberFailBets: amberFailBets,
             winInvest: winInvest,
             winReturn: winReturn,
+            amberFailInvest: amberFailInvest,
+            amberFailReturn: amberFailReturn,
             trioInvest: isLegacyRace ? 0 : finalTrioCombos.size * 100,
             trioReturn: trioReturn
         };
@@ -864,6 +902,75 @@ document.addEventListener('DOMContentLoaded', () => {
             };
         });
     }
+    function calculateAmberStats(simulatedRaces) {
+        let passInvest = 0, passReturn = 0, passHits = 0, passRaces = 0;
+        let failInvest = 0, failReturn = 0, failHits = 0, failRaces = 0;
+
+        simulatedRaces.forEach(r => {
+            if (r.winInvest > 0) {
+                passRaces++;
+                passInvest += r.winInvest;
+                passReturn += r.winReturn;
+                if (r.winReturn > 0) passHits++;
+            }
+            if (r.amberFailInvest > 0) {
+                failRaces++;
+                failInvest += r.amberFailInvest;
+                failReturn += r.amberFailReturn;
+                if (r.amberFailReturn > 0) failHits++;
+            }
+        });
+
+        return [
+            {
+                name: '🟢 通過 (実購入)',
+                races: passRaces,
+                invest: passInvest,
+                return: passReturn,
+                hits: passHits,
+                roi: passInvest > 0 ? (passReturn / passInvest) * 100 : 0
+            },
+            {
+                name: '⚠️ 見送り (回避した罠)',
+                races: failRaces,
+                invest: failInvest,
+                return: failReturn,
+                hits: failHits,
+                roi: failInvest > 0 ? (failReturn / failInvest) * 100 : 0
+            }
+        ];
+    }
+
+    function renderAmberReport(stats) {
+        let html = `
+            <div class="overflow-x-auto">
+                <table class="analysis-table w-full text-sm">
+                    <thead>
+                        <tr>
+                            <th>判定ステータス</th>
+                            <th>対象レース数</th>
+                            <th>仮想投資額</th>
+                            <th>的中率</th>
+                            <th>回収率</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${stats.map(s => `
+                            <tr>
+                                <td class="font-bold">${s.name}</td>
+                                <td>${s.races}</td>
+                                <td>${s.invest.toLocaleString()}円</td>
+                                <td>${s.races > 0 ? (s.hits / s.races * 100).toFixed(1) : '0'}% (${s.hits}/${s.races})</td>
+                                <td class="${s.roi >= 100 ? 'text-green-400 font-bold' : ''}">${s.roi.toFixed(1)}%</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        `;
+        const el = document.getElementById('amberReportArea');
+        if(el) el.innerHTML = html;
+    }
 
     function calculateRecommendationStats(simulatedRaces) {
         const order = ['SSS', 'SS', 'S', 'Low'];
@@ -1014,7 +1121,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         
         try {
-            const { rowsWithRank, classStats, riskStats, recStats, simulatedRaces } = window.latestSimData;
+            const { rowsWithRank, classStats, riskStats, amberStats, recStats, simulatedRaces } = window.latestSimData;
             const totalRaces = parseInt(document.getElementById('stat-race-count')?.textContent || '0') || 0;
             const overallRoi = parseFloat(document.getElementById('stat-overall-roi')?.textContent || '0') || 0;
 
@@ -1276,7 +1383,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 evaluationPerformance: evaluationPerformance,
                 recommendationPerformance: recommendationPerformance,
                 densityPerformance: densityPerformance,
-                // Amber logic removed
+                amberAudit: {
+                    passed: {
+                        sampleSize: (amberStats && amberStats[0]) ? amberStats[0].races : 0,
+                        hitRate: (amberStats && amberStats[0]) && amberStats[0].races > 0 ? (amberStats[0].hits / amberStats[0].races) * 100 : 0.0,
+                        recoveryRate: (amberStats && amberStats[0]) ? amberStats[0].roi : 0
+                    },
+                    failed: {
+                        sampleSize: (amberStats && amberStats[1]) ? amberStats[1].races : 0,
+                        hitRate: (amberStats && amberStats[1]) && amberStats[1].races > 0 ? (amberStats[1].hits / amberStats[1].races) * 100 : 0.0,
+                        recoveryRate: (amberStats && amberStats[1]) ? amberStats[1].roi : 0
+                    }
+                },
                 oddsBinAnalysis: oddsBinAnalysis,
                 classPerformance: classPerformance
             };
@@ -1509,6 +1627,30 @@ document.addEventListener('DOMContentLoaded', () => {
         
         const streakEl = document.getElementById('stat-losing-streak');
         if(streakEl) streakEl.textContent = `${s.maxWinLosingStreak}連敗`;
+    }
+
+    function renderRiskAnalysisDetails(s) {
+        const distEl = document.getElementById('streakDistributionArea');
+        if (distEl && s.losingStreakDistribution) {
+            let html = '';
+            for (const [bracket, count] of Object.entries(s.losingStreakDistribution)) {
+                const bar = '█'.repeat(count);
+                html += `<div><span class="inline-block w-20 text-right mr-4">${bracket}連敗:</span><span class="inline-block w-12 text-right mr-4">${count}回</span><span class="text-blue-500">${bar}</span></div>`;
+            }
+            distEl.innerHTML = html;
+        }
+
+        const mcEl = document.getElementById('monteCarloArea');
+        if (mcEl && s.monteCarloMddProbabilities) {
+            let html = '<div class="mb-2 text-slate-400">各閾値における最大DD超過確率</div>';
+            for (const [key, prob] of Object.entries(s.monteCarloMddProbabilities)) {
+                const t = key.replace('exceeds_', '').replace('U', '');
+                const barLen = Math.floor(prob / 5);
+                const bar = '█'.repeat(barLen);
+                html += `<div><span class="inline-block w-24 text-right mr-4">-${t}U 超過:</span><span class="inline-block w-16 text-right mr-4">${prob.toFixed(2)}%</span><span class="text-red-500">${bar}</span></div>`;
+            }
+            mcEl.innerHTML = html;
+        }
     }
 
     function renderClassTable(stats) {
