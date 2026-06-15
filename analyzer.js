@@ -271,13 +271,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const recStats = calculateRecommendationStats(simulatedRaces);
             renderRecommendationTable(recStats);
 
-            let amberStats = [];
-            try {
-                amberStats = calculateAmberStats(simulatedRaces);
-                renderAmberReport(amberStats);
-            } catch (e) {
-                console.error("Amber Report rendering error:", e);
-            }
+            // Amber Report removed
 
             drawEquityCurve(simulatedRaces);
 
@@ -291,7 +285,7 @@ document.addEventListener('DOMContentLoaded', () => {
             geminiOutput.value = md;
 
             // JSONエクスポートデータの保持
-            window.latestSimData = { rowsWithRank, riskStats, classStats, amberStats, recStats, simulatedRaces };
+            window.latestSimData = { rowsWithRank, riskStats, classStats, recStats, simulatedRaces };
 
             const jsonBtn = document.getElementById('downloadJsonBtn');
             if (jsonBtn) jsonBtn.classList.remove('hidden');
@@ -365,21 +359,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 else if (r === 'D' && ev >= 1.300 && ev <= 1.799) cls = 'D1';
             }
 
-            let mao = 999;
-            if (winRate > 0) {
-                if (['S0','S1','S2','A0','B0+','A1','B0'].includes(cls)) mao = 0.50 / winRate;
-                else if (['B1', 'B2', 'B3', 'A2', 'A3'].includes(cls)) mao = 0.90 / winRate;
-                else if (cls === 'X') mao = 3.00 / winRate;
-                else if (cls === 'D1') mao = 1.00 / winRate;
-            }
+            // Amber logic removed
 
-            let amberPass = false;
-            if (cls === 'X' || cls === 'D1') {
-                amberPass = h.usedOdds >= mao;
-            } else if (['S0','S1','S2','A0','B0+','A1','B0','B1','B2','B3','A2', 'A3'].includes(cls)) {
-                amberPass = h.usedOdds >= (mao * 1.2);
-            }
-            h.amberPass = amberPass;
             
             // 後続のシミュレーションがそのまま動くようにCSVの値を強制上書き
             h["最終確定クラス"] = cls;
@@ -452,9 +433,8 @@ document.addEventListener('DOMContentLoaded', () => {
             return evA - evB;
         };
 
-        // 【単勝シミュレーション馬選定とAmber検証用グループ分け】
+        // 【単勝シミュレーション馬選定】
         let finalWinBets = [];
-        let amberFailBets = [];
         
         let allWinCandidates = [];
         for (let clsName of WIN_PRIORITY_LOCAL) {
@@ -470,14 +450,10 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
-        // 1. グループA：Amber通過（実購入）
         for (let h of allWinCandidates) {
             if (finalWinBets.length >= 2) break;
-            if (h.amberPass) finalWinBets.push(h);
+            finalWinBets.push(h);
         }
-
-        // 2. グループB：Amber見送り（回避した罠: Amber無視で上位2頭に入るはずだったが弾かれた馬）
-        amberFailBets = allWinCandidates.slice(0, 2).filter(h => !h.amberPass);
 
         // 【三連複シミュレーション買い目選定】
         let finalTrioCombos = new Set();
@@ -613,8 +589,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
         let winInvest = 0;
         let winReturn = 0;
-        let amberFailInvest = 0;
-        let amberFailReturn = 0;
 
         const rec = determineRecommendation(raceHorses);
         const getUnits = (cls) => {
@@ -652,20 +626,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
 
-        amberFailBets.forEach(h => {
-            const cls = (h["最終確定クラス"] || h["購入時クラス"] || "").trim();
-            const units = getUnits(cls);
-            amberFailInvest += units * 100;
-
-            if (parseInt(h["着順"]) === 1) {
-                const umaban = h["馬番"];
-                if (actualWinPayoutMap[umaban]) {
-                    amberFailReturn += actualWinPayoutMap[umaban] * units;
-                } else {
-                    amberFailReturn += (parseFloat(h["最終確定オッズ"]) || parseFloat(h["購入時オッズ"]) || 0) * 100 * units;
-                }
-            }
-        });
+        // Amber logic removed
 
         let trioReturn = 0;
         let trioHit = false;
@@ -710,11 +671,8 @@ document.addEventListener('DOMContentLoaded', () => {
             row2: row2,
             row3: row3Array,
             finalWinBets: finalWinBets,
-            amberFailBets: amberFailBets,
             winInvest: winInvest,
             winReturn: winReturn,
-            amberFailInvest: amberFailInvest,
-            amberFailReturn: amberFailReturn,
             trioInvest: isLegacyRace ? 0 : finalTrioCombos.size * 100,
             trioReturn: trioReturn
         };
@@ -723,8 +681,6 @@ document.addEventListener('DOMContentLoaded', () => {
     function calculateRiskMetrics(simulatedRaces) {
         let clvTotal = 0;
         let clvCount = 0;
-        let totalInvest = 0;
-        let totalReturn = 0;
 
         // Sort properly by date then race id
         const sortedData = [...simulatedRaces].sort((a,b) => {
@@ -785,28 +741,57 @@ document.addEventListener('DOMContentLoaded', () => {
             meanPnl = pnlUnits[0];
         }
 
-        const dist = { "1-4": 0, "5-9": 0, "10-14": 0, "15-19": 0, "20+": 0 };
+        const dist = { "1-3": 0, "4-6": 0, "7-9": 0, "10-14": 0, "15-19": 0, "20-24": 0, "25-29": 0, "30+": 0 };
         allStreaks.forEach(s => {
-            if (s <= 4) dist["1-4"]++;
-            else if (s <= 9) dist["5-9"]++;
+            if (s <= 3) dist["1-3"]++;
+            else if (s <= 6) dist["4-6"]++;
+            else if (s <= 9) dist["7-9"]++;
             else if (s <= 14) dist["10-14"]++;
             else if (s <= 19) dist["15-19"]++;
-            else dist["20+"]++;
+            else if (s <= 24) dist["20-24"]++;
+            else if (s <= 29) dist["25-29"]++;
+            else dist["30+"]++;
         });
 
-        // Original overall calculation
-        let oldCumulative = 0;
-        let oldPeak = 0;
-        let oldMaxDD = 0;
+        // Monte Carlo Simulation for Max DD
+        const MC_ITERATIONS = 10000;
+        const THRESHOLDS = [100, 150, 200, 250, 300, 400, 500];
+        const exceedCounts = { 100: 0, 150: 0, 200: 0, 250: 0, 300: 0, 400: 0, 500: 0 };
+        
+        for (let i = 0; i < MC_ITERATIONS; i++) {
+            // Shuffle
+            const shuffled = [...pnlUnits];
+            for (let j = shuffled.length - 1; j > 0; j--) {
+                const k = Math.floor(Math.random() * (j + 1));
+                [shuffled[j], shuffled[k]] = [shuffled[k], shuffled[j]];
+            }
+            
+            let mcCum = 0;
+            let mcHwm = 0;
+            let mcMaxDd = 0;
+            for (let j = 0; j < shuffled.length; j++) {
+                mcCum += shuffled[j];
+                if (mcCum > mcHwm) mcHwm = mcCum;
+                const dd = mcHwm - mcCum;
+                if (dd > mcMaxDd) mcMaxDd = dd;
+            }
+            
+            for (const t of THRESHOLDS) {
+                if (mcMaxDd >= t) exceedCounts[t]++;
+            }
+        }
+        
+        const mcProbs = {};
+        for (const t of THRESHOLDS) {
+            mcProbs[`exceeds_${t}U`] = parseFloat(((exceedCounts[t] / MC_ITERATIONS) * 100).toFixed(2));
+        }
+
+        // Calculate old totals for UI compatibility
+        let totalInvest = 0;
+        let totalReturn = 0;
         sortedData.forEach(r => {
-            const invest = r.winInvest + r.trioInvest;
-            const p = r.winReturn + r.trioReturn;
-            totalInvest += invest;
-            totalReturn += p;
-            oldCumulative += (p - invest);
-            if (oldCumulative > oldPeak) oldPeak = oldCumulative;
-            const dd = oldPeak - oldCumulative;
-            if (dd > oldMaxDD) oldMaxDD = dd;
+            totalInvest += r.winInvest + r.trioInvest;
+            totalReturn += r.winReturn + r.trioReturn;
 
             r.horses.forEach(h => {
                 const fo = parseFloat(h["最終確定オッズ"]);
@@ -819,8 +804,8 @@ document.addEventListener('DOMContentLoaded', () => {
             raceCount: simulatedRaces.length,
             horseCount: simulatedRaces.reduce((acc, r) => acc + r.horses.length, 0),
             roi: totalInvest > 0 ? (totalReturn / totalInvest) * 100 : 0,
-            mdd: oldMaxDD,
-            mddRate: totalInvest > 0 ? (oldMaxDD / totalInvest) * 100 : 0,
+            mdd: 0, // Old mdd completely removed
+            mddRate: 0,
             avgClv: clvCount > 0 ? clvTotal / clvCount : 1.0,
             
             // Financial & Risk Metrics
@@ -828,7 +813,8 @@ document.addEventListener('DOMContentLoaded', () => {
             maxDrawdownUnits: maxDDU,
             sharpeRatio: sharpe,
             maxWinLosingStreak: maxLosingStreak,
-            losingStreakDistribution: dist
+            losingStreakDistribution: dist,
+            monteCarloMddProbabilities: mcProbs
         };
     }
 
@@ -919,45 +905,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }).filter(s => s.raceCount > 0);
     }
 
-    function calculateAmberStats(simulatedRaces) {
-        let passInvest = 0, passReturn = 0, passHits = 0, passRaces = 0;
-        let failInvest = 0, failReturn = 0, failHits = 0, failRaces = 0;
-
-        simulatedRaces.forEach(r => {
-            if (r.winInvest > 0) {
-                passRaces++;
-                passInvest += r.winInvest;
-                passReturn += r.winReturn;
-                if (r.winReturn > 0) passHits++;
-            }
-            if (r.amberFailInvest > 0) {
-                failRaces++;
-                failInvest += r.amberFailInvest;
-                failReturn += r.amberFailReturn;
-                if (r.amberFailReturn > 0) failHits++;
-            }
-        });
-
-        return [
-            {
-                name: '🟢 通過 (実購入)',
-                races: passRaces,
-                invest: passInvest,
-                return: passReturn,
-                hits: passHits,
-                roi: passInvest > 0 ? (passReturn / passInvest) * 100 : 0
-            },
-            {
-                name: '⚠️ 見送り (回避した罠)',
-                races: failRaces,
-                invest: failInvest,
-                return: failReturn,
-                hits: failHits,
-                roi: failInvest > 0 ? (failReturn / failInvest) * 100 : 0
-            }
-        ];
-    }
-
     function renderRecommendationTable(stats) {
         const recColors = { 'SSS': 'text-yellow-300', 'SS': 'text-orange-400', 'S': 'text-blue-400', 'Low': 'text-slate-400' };
         const fmtHitRate = (hits, total) => total > 0 ? `${(hits / total * 100).toFixed(1)}% (${hits}/${total})` : '-';
@@ -1000,35 +947,7 @@ document.addEventListener('DOMContentLoaded', () => {
         recommendationResultArea.innerHTML = html;
     }
 
-    function renderAmberReport(stats) {
-        let html = `
-            <div class="overflow-x-auto">
-                <table class="analysis-table w-full text-sm">
-                    <thead>
-                        <tr>
-                            <th>判定ステータス</th>
-                            <th>対象レース数</th>
-                            <th>仮想投資額</th>
-                            <th>的中率</th>
-                            <th>回収率</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${stats.map(s => `
-                            <tr>
-                                <td class="font-bold">${s.name}</td>
-                                <td>${s.races}</td>
-                                <td>${s.invest.toLocaleString()}円</td>
-                                <td>${s.races > 0 ? (s.hits / s.races * 100).toFixed(1) : '0'}% (${s.hits}/${s.races})</td>
-                                <td class="${s.roi >= 100 ? 'text-green-400 font-bold' : ''}">${s.roi.toFixed(1)}%</td>
-                            </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
-            </div>
-        `;
-        document.getElementById('amberReportArea').innerHTML = html;
-    }
+
 
     // --- 評価ランク用固定EV帯(Bin) 0.1刻み ---
     const RANK_EV_BINS = (() => {
@@ -1095,7 +1014,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         
         try {
-            const { rowsWithRank, classStats, riskStats, amberStats, recStats, simulatedRaces } = window.latestSimData;
+            const { rowsWithRank, classStats, riskStats, recStats, simulatedRaces } = window.latestSimData;
             const totalRaces = parseInt(document.getElementById('stat-race-count')?.textContent || '0') || 0;
             const overallRoi = parseFloat(document.getElementById('stat-overall-roi')?.textContent || '0') || 0;
 
@@ -1300,9 +1219,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 };
             });
 
-            const safeAmber0 = (amberStats && amberStats[0]) ? amberStats[0] : { races: 0, hits: 0, roi: 0 };
-            const safeAmber1 = (amberStats && amberStats[1]) ? amberStats[1] : { races: 0, hits: 0, roi: 0 };
-
             // 評価ランク別成績
             const evaluationPerformance = [];
             const ranksList = ['S', 'A', 'B', 'C', 'D', 'E', 'F'];
@@ -1354,23 +1270,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     maxDrawdownUnits: riskStats?.maxDrawdownUnits || 0,
                     sharpeRatio: riskStats?.sharpeRatio || 0,
                     maxWinLosingStreak: riskStats?.maxWinLosingStreak || 0,
-                    losingStreakDistribution: riskStats?.losingStreakDistribution || {}
+                    losingStreakDistribution: riskStats?.losingStreakDistribution || {},
+                    monteCarloMddProbabilities: riskStats?.monteCarloMddProbabilities || {}
                 },
                 evaluationPerformance: evaluationPerformance,
                 recommendationPerformance: recommendationPerformance,
                 densityPerformance: densityPerformance,
-                amberAudit: {
-                    passed: {
-                        sampleSize: safeAmber0.races,
-                        hitRate: safeAmber0.races > 0 ? (safeAmber0.hits / safeAmber0.races) * 100 : 0.0,
-                        recoveryRate: safeAmber0.roi
-                    },
-                    failed: {
-                        sampleSize: safeAmber1.races,
-                        hitRate: safeAmber1.races > 0 ? (safeAmber1.hits / safeAmber1.races) * 100 : 0.0,
-                        recoveryRate: safeAmber1.roi
-                    }
-                },
+                // Amber logic removed
                 oddsBinAnalysis: oddsBinAnalysis,
                 classPerformance: classPerformance
             };
@@ -1993,20 +1899,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Charting ---
     function drawEquityCurve(simulatedRaces) {
-        const sorted = [...simulatedRaces].sort((a,b) => a.id.localeCompare(b.id));
+        // Sort properly by date then race id
+        const sorted = [...simulatedRaces].sort((a,b) => {
+            const dateA = a.horses[0] ? (a.horses[0]["日付"] || "ZZZZ") : "ZZZZ";
+            const dateB = b.horses[0] ? (b.horses[0]["日付"] || "ZZZZ") : "ZZZZ";
+            if (dateA !== dateB) return dateA.localeCompare(dateB);
+            return a.id.localeCompare(b.id);
+        });
+        
         const labels = [];
-        const expData = [];
         const actData = [];
-        let cumExp = 0; let cumAct = 0;
+        let cumAct = 0;
 
-        sorted.forEach((r, idx) => {
-            r.horses.forEach(h => {
-                cumExp += (parseFloat(h["最終確定期待値"]) || 0) * 100;
-            });
-            cumAct += r.winReturn + r.trioReturn - (r.winInvest + r.trioInvest);
+        const winBetRaces = sorted.filter(r => r.winInvest > 0);
+
+        winBetRaces.forEach((r, idx) => {
+            cumAct += (r.winReturn - r.winInvest) / 100.0;
             
-            labels.push(`R${idx+1}`);
-            expData.push(cumExp);
+            labels.push(`Win Race ${idx+1}`);
             actData.push(cumAct);
         });
 
@@ -2014,8 +1924,7 @@ document.addEventListener('DOMContentLoaded', () => {
         equityChartInstance = new Chart(document.getElementById('equityChart').getContext('2d'), {
             type: 'line',
             data: { labels, datasets: [
-                { label: '期待累積収支(全馬理論)', data: expData, borderColor: '#3b82f6', tension: 0.1, pointRadius: 0 },
-                { label: '実績累積収支(シミュレーション)', data: actData, borderColor: '#10b981', fill: true, backgroundColor: 'rgba(16, 185, 129, 0.1)', tension: 0.1, pointRadius: 0 }
+                { label: '実績累積収支 (単勝Unit)', data: actData, borderColor: '#10b981', fill: true, backgroundColor: 'rgba(16, 185, 129, 0.1)', tension: 0.1, pointRadius: 0 }
             ]},
             options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: '#fff' } } }, scales: { x:{display:false}, y:{grid:{color:'#334155'}, ticks:{color:'#94a3b8'}} } }
         });
@@ -2355,7 +2264,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 umaban: parseInt(h["馬番"]),
                 cls: (h["最終確定クラス"] || h["購入時クラス"] || "").trim(),
                 ev: parseFloat(h["最終確定期待値"]) || parseFloat(h["購入時期待値"]) || 0,
-                amberPassed: h.amberPass || false,
+                usedOdds: h.usedOdds,
                 auditPassed: h.auditStatus !== 'NG'
             }));
             
