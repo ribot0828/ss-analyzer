@@ -711,8 +711,8 @@ document.addEventListener('DOMContentLoaded', () => {
             winReturn: winReturn,
             amberFailInvest: amberFailInvest,
             amberFailReturn: amberFailReturn,
-            trioInvest: isLegacyRace ? 0 : finalTrioCombos.size * 100,
-            trioReturn: trioReturn
+            trioInvest: 0,
+            trioReturn: 0
         };
     }
 
