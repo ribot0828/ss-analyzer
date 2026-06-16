@@ -575,39 +575,23 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
-        // --- Legacy自己検算: 2026-04-11より前 または 日付が"Legacy"のレースは単勝払戻をオッズから再計算 ---
-        const isLegacyRace = raceHorses[0] && (() => {
-            const dateStr = (raceHorses[0]["日付"] || "").trim();
-            if (dateStr === "Legacy" || dateStr === "") return true;
-            // 2026-04-11より前の全日付をLegacy扱い
-            if (dateStr < "2026-04-11") return true;
-            return false;
-        })();
-
         let actualWinPayoutMap = {};
         let actualTrioPayout = 0;
 
-        if (isLegacyRace) {
-            // Legacy期: 1着馬のオッズから単勝払戻を自己検算
-            raceHorses.forEach(h => {
-                if (parseInt(h["着順"]) === 1) {
-                    const odds = parseFloat(h["最終確定オッズ"]) || parseFloat(h["購入時オッズ"]) || 0;
-                    if (odds > 0) {
-                        actualWinPayoutMap[h["馬番"]] = Math.round(odds * 10) * 10;
-                    }
+        raceHorses.forEach(h => {
+            const wVal = parseFloat(h["単勝払戻"]);
+            if (!isNaN(wVal) && wVal > 0) {
+                actualWinPayoutMap[h["馬番"]] = wVal;
+            } else if (parseInt(h["着順"]) === 1) { // Fallback if CSV is missing single payout but odds exist
+                const odds = parseFloat(h["最終確定オッズ"]) || parseFloat(h["購入時オッズ"]) || 0;
+                if (odds > 0) {
+                    actualWinPayoutMap[h["馬番"]] = Math.round(odds * 10) * 10;
                 }
-                const tVal = parseFloat(h["三連複払戻"]);
-                if (!isNaN(tVal) && tVal > 0) actualTrioPayout = tVal;
-            });
-        } else {
-            // 通常期: CSVから読み取った払戻金をそのまま使用
-            raceHorses.forEach(h => {
-                const wVal = parseFloat(h["単勝払戻"]);
-                if (!isNaN(wVal) && wVal > 0) actualWinPayoutMap[h["馬番"]] = wVal;
-                const tVal = parseFloat(h["三連複払戻"]);
-                if (!isNaN(tVal) && tVal > 0) actualTrioPayout = tVal;
-            });
-        }
+            }
+
+            const tVal = parseFloat(h["三連複払戻"]);
+            if (!isNaN(tVal) && tVal > 0) actualTrioPayout = tVal;
+        });
 
         let winInvest = 0;
         let winReturn = 0;
@@ -666,11 +650,7 @@ document.addEventListener('DOMContentLoaded', () => {
         let trioReturn = 0;
         let trioHit = false;
 
-        if (isLegacyRace) {
-            // Legacy期: 三連複払戻データが破損しているため、三連複シミュレーションを完全除外
-            // trioReturn = 0, trioInvest = 0 として扱う
-        } else {
-            // 通常期: 三連複の的中判定と払戻集計
+        // 三連複の的中判定と払戻集計
             const winners = raceHorses.filter(h => parseInt(h["着順"]) <= 3).map(h => parseInt(h["馬番"])).sort((a,b) => a-b);
             if (winners.length >= 3) {
                 const getCombinations = (arr, k) => {
@@ -694,7 +674,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 // 独立して取得した三連複払戻(actualTrioPayout)のみを加算しています。
                 if (trioHit) trioReturn = actualTrioPayout;
             }
-        }
 
         return {
             id: raceId,
@@ -711,7 +690,7 @@ document.addEventListener('DOMContentLoaded', () => {
             winReturn: winReturn,
             amberFailInvest: amberFailInvest,
             amberFailReturn: amberFailReturn,
-            trioInvest: isLegacyRace ? 0 : finalTrioCombos.size * 100,
+            trioInvest: finalTrioCombos.size * 100,
             trioReturn: trioReturn
         };
     }
