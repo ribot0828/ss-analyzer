@@ -575,17 +575,28 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
+        const dateStr = (raceHorses[0] && raceHorses[0]["日付"]) ? raceHorses[0]["日付"].trim() : "";
+        const forceRecalculateWin = dateStr === "Legacy" || dateStr === "" || dateStr < "2026-04-05";
+
         let actualWinPayoutMap = {};
         let actualTrioPayout = 0;
 
         raceHorses.forEach(h => {
-            const wVal = parseFloat(h["単勝払戻"]);
-            if (!isNaN(wVal) && wVal > 0) {
-                actualWinPayoutMap[h["馬番"]] = wVal;
-            } else if (parseInt(h["着順"]) === 1) { // Fallback if CSV is missing single payout but odds exist
+            if (forceRecalculateWin && parseInt(h["着順"]) === 1) {
+                // 2026-04-05以前は、単勝払戻データを無視してオッズから自己検算
                 const odds = parseFloat(h["最終確定オッズ"]) || parseFloat(h["購入時オッズ"]) || 0;
                 if (odds > 0) {
                     actualWinPayoutMap[h["馬番"]] = Math.round(odds * 10) * 10;
+                }
+            } else {
+                // それ以降はCSVの値を優先
+                const wVal = parseFloat(h["単勝払戻"]);
+                if (!isNaN(wVal) && wVal > 0) {
+                    actualWinPayoutMap[h["馬番"]] = wVal;
+                } else if (parseInt(h["着順"]) === 1) {
+                    // フォールバック
+                    const odds = parseFloat(h["最終確定オッズ"]) || parseFloat(h["購入時オッズ"]) || 0;
+                    if (odds > 0) actualWinPayoutMap[h["馬番"]] = Math.round(odds * 10) * 10;
                 }
             }
 
