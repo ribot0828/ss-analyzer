@@ -1392,7 +1392,35 @@ document.addEventListener('DOMContentLoaded', () => {
                 classPerformance: classPerformance
             };
 
-            const jsonString = JSON.stringify(jsonPayload, null, 2);
+            // --- 出力最適化: サンプル0の項目を除去 / 数値を丸め / 改行・空白を排してファイルを軽量化 ---
+            const isEmptyEntry = (o) => {
+                if (!o || typeof o !== 'object') return false;
+                if ('samples' in o) return (o.samples || 0) === 0;
+                if ('sampleSize' in o) return (o.sampleSize || 0) === 0;
+                if ('sampleRaces' in o) return (o.sampleRaces || 0) === 0;
+                if (o.auditOK && o.auditNG) return ((o.auditOK.samples || 0) + (o.auditNG.samples || 0)) === 0;
+                return false;
+            };
+            const roundNum = (v) => {
+                if (typeof v !== 'number' || !isFinite(v)) return v;
+                if (Number.isInteger(v)) return v;
+                // 率(%)は小数2桁、|v|<1のシャープレシオ等は4桁で十分
+                return Math.abs(v) < 1 ? Math.round(v * 1e4) / 1e4 : Math.round(v * 100) / 100;
+            };
+            const optimize = (node) => {
+                if (Array.isArray(node)) {
+                    return node.map(optimize).filter(item => !isEmptyEntry(item));
+                }
+                if (node && typeof node === 'object') {
+                    const out = {};
+                    for (const k of Object.keys(node)) out[k] = optimize(node[k]);
+                    return out;
+                }
+                return roundNum(node);
+            };
+            const optimizedPayload = optimize(jsonPayload);
+
+            const jsonString = JSON.stringify(optimizedPayload);
             const blob = new Blob([jsonString], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
