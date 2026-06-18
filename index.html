@@ -253,13 +253,26 @@
                 </section>
             </div>
 
-            <!-- 4. Gemini Export Section -->
+            <!-- 4. AI討論コピー (Gemini / Claude) -->
             <section id="geminiExportSection" class="glass-panel animate-fade hidden">
-                <div class="flex justify-between items-center mb-4">
-                    <h2 class="text-xl font-semibold">✨ Gemini 3 思考モード連携サマリー</h2>
-                    <button id="copyBtn" class="btn-primary px-4 py-2 rounded-md text-sm">コピー</button>
+                <h2 class="text-xl font-semibold mb-1">🤝 AI討論コピー</h2>
+                <p class="text-xs text-slate-400 mb-4">① 左「Gemini用」をコピーして Gemini に貼る → 出た提案を全文コピー ／ ② 右「Claude用」をコピーして Claude に貼り、続けて末尾にGeminiの提案を貼る → 検証(②)と統合(③)は<strong>同じClaudeチャット内</strong>で連続実行します。</p>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <div class="flex justify-between items-center mb-2">
+                            <h3 class="font-semibold text-blue-300">① 提案用（Gemini に貼る）</h3>
+                            <button id="copyGeminiBtn" class="btn-primary px-4 py-2 rounded-md text-sm">Gemini用をコピー</button>
+                        </div>
+                        <textarea id="geminiOutput" class="summary-area w-full" style="height: 360px;" readonly></textarea>
+                    </div>
+                    <div>
+                        <div class="flex justify-between items-center mb-2">
+                            <h3 class="font-semibold text-orange-300">②③ 検証・統合用（Claude に貼る）</h3>
+                            <button id="copyClaudeBtn" class="btn-primary px-4 py-2 rounded-md text-sm">Claude用をコピー</button>
+                        </div>
+                        <textarea id="claudeOutput" class="summary-area w-full" style="height: 360px;" readonly></textarea>
+                    </div>
                 </div>
-                <textarea id="geminiOutput" class="summary-area w-full" style="height: 400px;" readonly></textarea>
             </section>
         </main>
 

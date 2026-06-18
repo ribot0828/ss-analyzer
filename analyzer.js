@@ -17,8 +17,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const simChartContainer = document.getElementById('simChartContainer');
     const outlierResultArea = document.getElementById('outlierResultArea');
     const geminiOutput = document.getElementById('geminiOutput');
+    const claudeOutput = document.getElementById('claudeOutput');
     const geminiExportSection = document.getElementById('geminiExportSection');
-    const copyBtn = document.getElementById('copyBtn');
+    const copyGeminiBtn = document.getElementById('copyGeminiBtn');
+    const copyClaudeBtn = document.getElementById('copyClaudeBtn');
     const toast = document.getElementById('toast');
     const runSimulatorBtn = document.getElementById('runSimulatorBtn');
 
@@ -287,8 +289,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const outliers = detectOutliers(rowsWithRank);
             renderOutliers(outliers);
 
-            const md = generateUltimateMarkdown(riskStats, classStats, recStats, outliers, simulatedRaces);
-            geminiOutput.value = md;
+            const aiPrompts = generateUltimateMarkdown(riskStats, classStats, recStats, outliers, simulatedRaces);
+            geminiOutput.value = aiPrompts.gemini;
+            claudeOutput.value = aiPrompts.claude;
 
             window.latestSimData = { rowsWithRank, riskStats, classStats, amberStats, recStats, simulatedRaces };
 
@@ -2373,14 +2376,12 @@ document.addEventListener('DOMContentLoaded', () => {
 `;
         }
 
-        md += `
+        // ここまでの md = データ本体（リスク指標・クラス別・推奨度別・異常値）。両AI共通で先頭に付ける。
+        const reportBody = md;
+
+        const specBlock = `
 ---
-## 🤝 AI討論プロトコル（手動コピペ運用）
-
-このレポート全体（上のリスク指標・クラス別・推奨度別・異常値の表）を一緒に貼って使います。
-役割は固定です（提案=Gemini / 検証=Claude）。一巡したら、役割を入れ替えてもう一度回すと結論が頑健になります。
-
-### ◤ SS-Engine 現行仕様（両AI共通の前提）◢
+### ◤ SS-Engine 現行仕様（前提）◢
 - スコア: S=100, A=65, B=40, C=20, D=10, E=3, F=0.5
 - 予想勝率 = 自スコア ÷ 出走全馬スコア合計（オッズ>0の馬のみ）
 - 期待値EV = 予想勝率 × 単勝オッズ（小数第3位以下を切り捨て）
@@ -2397,40 +2398,8 @@ document.addEventListener('DOMContentLoaded', () => {
 - 推奨度: 密度≧0.250 かつ S0/S1あり→SSS ／ 密度≧0.250 かつ 軸あり→SS ／ 密度≧0.150→S ／ それ未満→Low
 - 三連複の執行判定: 軸不在、または 密度 <（重賞0.10 / 平場0.15）なら SKIP
 - 単勝ユニット配分: SSS(A3=6,B2=4,他=2) ／ SS(A3=5,B2=3,他=2) ／ S(A3=3,B2=2,他=1) ／ Low(すべて1)
-
----
-
-### ① 提案フェーズ ── Gemini に貼る（提案者）
-あなたは競馬投資モデル「SS-Engine」の改善提案者です。上の現行仕様と本レポートの実績データに基づき、改善案を出してください。
-1. 回収率の高い／低いクラス・推奨度・EV帯・環境条件（会場・距離・馬場）を特定する。
-2. それを踏まえ、変更すべきパラメータ（クラス境界EV、MAO係数、SS密度閾値、ユニット配分など）を「現行値 → 提案値」の形で**具体的な数値で**提案する。各案に必ず「根拠データ（該当する表の数値）」と「狙う効果」を添える。
-3. 最大ドローダウンを抑えつつ利益を最大化する資金配分（ケリー基準の調整）も提案する。
-出力は「提案リスト（各案: 対象 / 現行値 / 提案値 / 根拠 / 期待効果）」の形式で。Geminiの回答をそのまま次の②へ渡します。
-
----
-
-### ② 検証フェーズ ── Claude に貼る（検証者）
-あなたは「SS-Engine」の改善案を査定する厳格な検証者です。上の現行仕様・本レポートのデータ・そして【Geminiの提案（このプロンプトの前に貼り付け）】を読み、各提案を一つずつ査定してください。
-各提案について次を判定する:
-- 統計的妥当性: 根拠データのサンプル数は十分か（n<30は要注意、n<10は原則却下）。偶然・分散の範囲ではないか。
-- 過学習リスク: 特定期間・特定条件に過剰適合していないか。汎化するか。
-- 内部整合性: 現行ロジック（クラス境界の連続性、MAO/Amberの整合、密度・推奨度の定義）と矛盾しないか。境界変更で隙間や重複が生じないか。
-- 副作用: その変更が他クラス・他指標（的中率/回収率/DD）に与える悪影響。
-判定は各案を「採用 / 条件付き採用（修正案を明記）/ 却下」に分類し、理由を述べる。Claudeの査定をそのまま③へ渡します。
-
----
-
-### ③ 統合フェーズ ── ①②を貼った側（または新規スレ）に投げる
-Geminiの提案とClaudeの査定を統合し、「実際にコードへ反映する最終変更リスト」を作る。各項目: 対象パラメータ / 現行値 → 最終値 / 採用理由。次回データで検証すべき仮説も併記する。
-
-※ 役割反転オプション: 同じ①〜③を「提案=Claude / 検証=Gemini」でもう一巡し、両結論が一致した案を優先採用すると頑健性が上がります。
-
 `;
 
-        md += `---
-### 🤖 システム連携用JSON（レース詳細データ）
-`;
-        
         const raceJsonList = (simulatedRaces || []).map(r => {
             const strikers = (r.finalWinBets || []).map(h => ({
                 umaban: parseInt(h["馬番"]),
@@ -2460,12 +2429,50 @@ Geminiの提案とClaudeの査定を統合し、「実際にコードへ反映�
             };
         });
 
-        md += `\`\`\`json
+        const jsonBlock = `
+---
+### 🤖 レース詳細データ（参考JSON）
+\`\`\`json
 ${JSON.stringify(raceJsonList, null, 2)}
 \`\`\`
 `;
 
-        return md;
+        // ① 提案用（Gemini に貼る）
+        const geminiMd = reportBody + specBlock + `
+---
+## 🟦 あなたの役割: 改善提案者（ステップ①）
+あなたは競馬投資モデル「SS-Engine」の改善提案者です。上の現行仕様と実績データに基づき、改善案を出してください。
+1. 回収率の高い／低いクラス・推奨度・EV帯・環境条件（会場・距離・馬場）を特定する。
+2. それを踏まえ、変更すべきパラメータ（クラス境界EV、MAO係数、SS密度閾値、ユニット配分など）を「現行値 → 提案値」の形で具体的な数値で提案する。各案に必ず「根拠データ（該当する表の数値）」と「狙う効果」を添える。
+3. 最大ドローダウンを抑えつつ利益を最大化する資金配分（ケリー基準の調整）も提案する。
+出力形式: 提案リスト（各案: 対象 / 現行値 / 提案値 / 根拠 / 期待効果）。
+この回答（提案リスト全文）をコピーし、次は「Claude用コピー」を貼ったClaudeのチャットに貼り付けてください。
+` + jsonBlock;
+
+        // ②③ 検証・統合用（Claude に貼る）
+        const claudeMd = reportBody + specBlock + `
+---
+## 🟧 あなたの役割: 改善案の検証者（ステップ②→③）
+
+【ステップ②: 検証】
+あなたは「SS-Engine」の改善案を査定する厳格な検証者です。上の現行仕様・実績データ・そしてこのメッセージの末尾に貼り付けるGeminiの提案を読み、各提案を一つずつ査定してください。
+判定軸:
+- 統計的妥当性: 根拠データのサンプル数は十分か（n<30は要注意、n<10は原則却下）。偶然・分散の範囲ではないか。
+- 過学習リスク: 特定期間・特定条件に過剰適合していないか。汎化するか。
+- 内部整合性: 現行ロジック（クラス境界の連続性、MAO/Amberの整合、密度・推奨度の定義）と矛盾しないか。境界変更で隙間や重複が生じないか。
+- 副作用: 他クラス・他指標（的中率/回収率/DD）への悪影響。
+各案を「採用 / 条件付き採用（修正案を明記）/ 却下」に分類し、理由を述べる。
+
+【ステップ③: 統合】← ②の直後、この同じClaudeチャットでそのまま続けて実行
+②の査定を踏まえ「実際にコードへ反映する最終変更リスト」を作る。各項目: 対象パラメータ / 現行値 → 最終値 / 採用理由。次回データで検証すべき仮説も併記する。
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+↓↓↓ ここに Gemini の提案（ステップ①の回答）を貼り付け ↓↓↓
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+` + jsonBlock;
+
+        return { gemini: geminiMd, claude: claudeMd };
     }
     // --- Others ---
     integrateBtn.addEventListener('click', () => {
@@ -2506,11 +2513,26 @@ ${JSON.stringify(raceJsonList, null, 2)}
         showToast(`統合CSV出力完了 (最新: ${latestDate})`);
     });
 
-    copyBtn.addEventListener('click', () => {
-        geminiOutput.select();
-        document.execCommand('copy');
-        showToast("コピーしました");
-    });
+    const copyTextarea = (el, label) => {
+        if (!el || !el.value) { showToast("先に解析を実行してください"); return; }
+        el.focus();
+        el.select();
+        let ok = false;
+        try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+        if (ok) {
+            showToast(`${label}をコピーしました`);
+        } else if (navigator.clipboard) {
+            navigator.clipboard.writeText(el.value)
+                .then(() => showToast(`${label}をコピーしました`))
+                .catch(() => showToast("コピーに失敗しました"));
+        } else {
+            showToast("コピーに失敗しました");
+        }
+        window.getSelection().removeAllRanges();
+    };
+
+    if (copyGeminiBtn) copyGeminiBtn.addEventListener('click', () => copyTextarea(geminiOutput, "Gemini用"));
+    if (copyClaudeBtn) copyClaudeBtn.addEventListener('click', () => copyTextarea(claudeOutput, "Claude用"));
 
     function showToast(msg) {
         toast.textContent = msg;
