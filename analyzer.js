@@ -2400,54 +2400,20 @@ document.addEventListener('DOMContentLoaded', () => {
 - 単勝ユニット配分: SSS(A3=6,B2=4,他=2) ／ SS(A3=5,B2=3,他=2) ／ S(A3=3,B2=2,他=1) ／ Low(すべて1)
 `;
 
-        const raceJsonList = (simulatedRaces || []).map(r => {
-            const strikers = (r.finalWinBets || []).map(h => ({
-                umaban: parseInt(h["馬番"]),
-                cls: (h["最終確定クラス"] || h["購入時クラス"] || "").trim(),
-                ev: parseFloat(h["最終確定期待値"]) || parseFloat(h["購入時期待値"]) || 0,
-                usedOdds: h.usedOdds,
-                auditPassed: h.auditStatus !== 'NG'
-            }));
-            
-            const allHorses = (r.horses || []).map(h => ({
-                umaban: parseInt(h["馬番"]),
-                score: parseFloat(h["総合スコア"]) || 0,
-                winRate: parseFloat(h["予想勝率"]) || 0,
-                ev: parseFloat(h["最終確定期待値"]) || parseFloat(h["購入時期待値"]) || 0,
-                cls: (h["最終確定クラス"] || h["購入時クラス"] || "").trim()
-            }));
-
-            return {
-                raceId: r.id,
-                raceInfo: {
-                    ssDensity: r.ssDensity || 0,
-                    recommendation: r.rec || "Low",
-                    skipJudgment: r.skipTrio ? "SKIP" : "EXECUTE"
-                },
-                strikers: strikers,
-                allHorses: allHorses
-            };
-        });
-
-        const jsonBlock = `
----
-### 🤖 レース詳細データ（参考JSON）
-\`\`\`json
-${JSON.stringify(raceJsonList, null, 2)}
-\`\`\`
-`;
+        // 詳細なレース別データは「AI分析用データ出力 (JSON)」ボタンで出力したファイルを
+        // 各AIのチャットに添付して渡す運用。コピーには文字数節約のためJSONを含めない。
 
         // ① 提案用（Gemini に貼る）
         const geminiMd = reportBody + specBlock + `
 ---
 ## 🟦 あなたの役割: 改善提案者（ステップ①）
-あなたは競馬投資モデル「SS-Engine」の改善提案者です。上の現行仕様と実績データに基づき、改善案を出してください。
+あなたは競馬投資モデル「SS-Engine」の改善提案者です。上の現行仕様と実績データ（および、このチャットに添付されたレース別データJSONがあればそれも）に基づき、改善案を出してください。
 1. 回収率の高い／低いクラス・推奨度・EV帯・環境条件（会場・距離・馬場）を特定する。
 2. それを踏まえ、変更すべきパラメータ（クラス境界EV、MAO係数、SS密度閾値、ユニット配分など）を「現行値 → 提案値」の形で具体的な数値で提案する。各案に必ず「根拠データ（該当する表の数値）」と「狙う効果」を添える。
 3. 最大ドローダウンを抑えつつ利益を最大化する資金配分（ケリー基準の調整）も提案する。
 出力形式: 提案リスト（各案: 対象 / 現行値 / 提案値 / 根拠 / 期待効果）。
 この回答（提案リスト全文）をコピーし、次は「Claude用コピー」を貼ったClaudeのチャットに貼り付けてください。
-` + jsonBlock;
+`;
 
         // ②③ 検証・統合用（Claude に貼る）
         const claudeMd = reportBody + specBlock + `
@@ -2455,7 +2421,7 @@ ${JSON.stringify(raceJsonList, null, 2)}
 ## 🟧 あなたの役割: 改善案の検証者（ステップ②→③）
 
 【ステップ②: 検証】
-あなたは「SS-Engine」の改善案を査定する厳格な検証者です。上の現行仕様・実績データ・そしてこのメッセージの末尾に貼り付けるGeminiの提案を読み、各提案を一つずつ査定してください。
+あなたは「SS-Engine」の改善案を査定する厳格な検証者です。上の現行仕様・実績データ（および添付のレース別データJSONがあればそれも）・そしてこのメッセージの末尾に貼り付けるGeminiの提案を読み、各提案を一つずつ査定してください。
 判定軸:
 - 統計的妥当性: 根拠データのサンプル数は十分か（n<30は要注意、n<10は原則却下）。偶然・分散の範囲ではないか。
 - 過学習リスク: 特定期間・特定条件に過剰適合していないか。汎化するか。
@@ -2470,7 +2436,7 @@ ${JSON.stringify(raceJsonList, null, 2)}
 ↓↓↓ ここに Gemini の提案（ステップ①の回答）を貼り付け ↓↓↓
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-` + jsonBlock;
+`;
 
         return { gemini: geminiMd, claude: claudeMd };
     }
