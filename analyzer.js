@@ -2156,6 +2156,11 @@ document.addEventListener('DOMContentLoaded', () => {
             n: b.n
         }));
 
+        // 母集団全体の平均回収（倍率）＝ 全帯の回収合計 ÷ 全件数。100%割れがEV見直しの引き金。
+        const grandN = stats.reduce((a, b) => a + b.n, 0);
+        const grandReturn = stats.reduce((a, b) => a + b.returnSum, 0);
+        const meanRecovery = grandN > 0 ? grandReturn / grandN : null;
+
         // サンプル数で重み付けした最小二乗回帰 (y = slope*x + intercept)
         let slope = null, intercept = null, r2 = null;
         const usable = points.filter(p => p.n >= 3); // ノイズ除去
@@ -2175,7 +2180,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 r2 = syy > 0 ? (sxy * sxy) / (sxx * syy) : null;
             }
         }
-        return { points, slope, intercept, r2, totalSamples: W };
+        return { points, slope, intercept, r2, totalSamples: W, meanRecovery, sampleCount: grandN };
     }
 
     let calibChartInstance = null;
@@ -2184,16 +2189,31 @@ document.addEventListener('DOMContentLoaded', () => {
         const ctx = document.getElementById('calibChart');
         if (!ctx) return;
 
-        const basis = basisLabel ? `<span class="text-cyan-400 font-bold">${basisLabel}</span> (n=${calib.totalSamples || 0})　` : '';
         if (readout) {
+            const parts = [];
+            if (basisLabel) parts.push(`<span class="text-cyan-400 font-bold">${basisLabel}</span> (n=${calib.sampleCount || 0})`);
+
+            // 水準（平均回収）= 見直しの引き金。100%割れで赤＋警告。
+            if (calib.meanRecovery !== null && calib.meanRecovery !== undefined) {
+                const lvl = calib.meanRecovery * 100;
+                const lvlColor = lvl >= 100 ? 'text-green-400' : 'text-red-400';
+                const lvlTag = lvl >= 100 ? '黒字' : '赤字';
+                let lvlStr = `平均回収 <strong class="${lvlColor}">${lvl.toFixed(0)}%（${lvlTag}）</strong>`;
+                if (lvl < 100) lvlStr += ` <span class="text-red-400 font-bold">⚠️ EV式見直しの検討時期</span>`;
+                parts.push(lvlStr);
+            }
+
+            // 傾き = 倍率の較正情報（見直しトリガーではない）
             if (calib.slope === null) {
-                readout.innerHTML = `${basis}<span class="text-slate-500">較正に十分なサンプルがありません（各EV帯 n≧3 が2帯以上必要）</span>`;
+                parts.push(`<span class="text-slate-500">傾き算出不可（各EV帯 n≧3 が2帯以上必要）</span>`);
             } else {
                 const dev = Math.abs(calib.slope - 1);
-                const color = dev <= 0.15 ? 'text-green-400' : (dev <= 0.4 ? 'text-yellow-400' : 'text-red-400');
-                const verdict = dev <= 0.15 ? '良好（EV式は概ね較正）' : (dev <= 0.4 ? '要観察' : '乖離大：EV式の見直しを推奨');
-                readout.innerHTML = `${basis}傾き <strong class="${color}">${calib.slope.toFixed(2)}</strong> / 切片 ${calib.intercept.toFixed(2)} / R² ${calib.r2 !== null ? calib.r2.toFixed(2) : '-'} <span class="${color}">— ${verdict}</span>`;
+                const color = dev <= 0.15 ? 'text-green-400' : (dev <= 0.4 ? 'text-yellow-400' : 'text-orange-400');
+                const verdict = dev <= 0.15 ? '倍率も較正' : (dev <= 0.4 ? '倍率はやや圧縮' : '倍率は未較正（EVの大小は割引いて解釈）');
+                parts.push(`傾き <strong class="${color}">${calib.slope.toFixed(2)}</strong> / R² ${calib.r2 !== null ? calib.r2.toFixed(2) : '-'} <span class="${color}">— ${verdict}</span>`);
             }
+
+            readout.innerHTML = parts.join('　/　');
         }
 
         const evs = calib.points.map(p => p.ev);
