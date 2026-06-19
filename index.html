@@ -166,6 +166,20 @@
                     </div>
                 </section>
 
+                <!-- EV Calibration (H2) -->
+                <section class="glass-panel animate-fade">
+                    <div class="flex flex-col md:flex-row md:items-center md:justify-between mb-3 gap-2">
+                        <h3 class="text-lg font-semibold flex items-center gap-2 text-cyan-400">
+                            🎯 EV較正曲線（予測EV vs 実回収率）
+                        </h3>
+                        <div id="calibReadout" class="text-sm text-slate-300"></div>
+                    </div>
+                    <p class="text-xs text-slate-500 mb-3">点線=完全較正(y=x)。実線=回帰直線。傾きが1から大きく外れる場合はEV式の見直しが最優先（H2）。点の大きさ=サンプル数。</p>
+                    <div class="chart-container" style="height: 380px; width: 100%;">
+                        <canvas id="calibChart"></canvas>
+                    </div>
+                </section>
+
                 <!-- Class Performance Table Area -->
                 <section class="glass-panel animate-fade">
                     <h3 class="text-lg font-semibold mb-6">📊 クラス別詳細パフォーマンス解析</h3>

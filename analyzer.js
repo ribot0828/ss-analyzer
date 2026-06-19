@@ -286,6 +286,10 @@ document.addEventListener('DOMContentLoaded', () => {
             initRankEvTabs(rowsWithRank);
             renderRankEvAnalysis('S', rowsWithRank);
 
+            const calibration = calculateCalibration(rowsWithRank);
+            renderCalibration(calibration);
+            window.latestCalibration = calibration;
+
             const outliers = detectOutliers(rowsWithRank);
             renderOutliers(outliers);
 
@@ -1376,7 +1380,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 },
                 oddsBinAnalysis: oddsBinAnalysis,
-                classPerformance: classPerformance
+                classPerformance: classPerformance,
+                // H2: EV較正（予測EV vs 実回収率）。slope≈1 なら較正済み、1から外れるほどEV式の見直し優先度↑
+                evCalibration: window.latestCalibration ? {
+                    slope: window.latestCalibration.slope,
+                    intercept: window.latestCalibration.intercept,
+                    r2: window.latestCalibration.r2,
+                    points: window.latestCalibration.points
+                } : null
             };
 
             // --- 出力最適化: サンプル0の項目を除去 / 数値を丸め / 改行・空白を排してファイルを軽量化 ---
@@ -2078,6 +2089,141 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // --- EV較正分析 (H2): 予測EV vs 実回収率 ---
+    function calculateCalibration(rows) {
+        // EV帯 0.25刻み（0.0〜3.0）+ 3.0以上。較正はサンプル確保が重要なので粗めに区切る
+        const bins = [];
+        for (let v = 0; v < 3.0 - 1e-9; v += 0.25) {
+            bins.push({ min: parseFloat(v.toFixed(2)), max: parseFloat((v + 0.25).toFixed(2)) });
+        }
+        bins.push({ min: 3.0, max: Infinity });
+
+        const stats = bins.map(b => ({ min: b.min, max: b.max, n: 0, evSum: 0, returnSum: 0 }));
+        (rows || []).forEach(r => {
+            const ev = parseFloat(r["最終確定期待値"]) || parseFloat(r["購入時期待値"]) || 0;
+            const odds = parseFloat(r["最終確定オッズ"]) || parseFloat(r["購入時オッズ"]) || 0;
+            if (ev <= 0 || odds <= 0) return;
+            const idx = stats.findIndex(b => ev >= b.min && ev < b.max);
+            if (idx === -1) return;
+            stats[idx].n++;
+            stats[idx].evSum += ev;
+            if (parseInt(r["着順"]) === 1) stats[idx].returnSum += odds; // 1着なら オッズ倍(×100円)を回収
+        });
+
+        // 各ビン: x=平均予測EV, y=実回収率(倍率)= 回収合計 ÷ 投入件数
+        const points = stats.filter(b => b.n > 0).map(b => ({
+            ev: b.evSum / b.n,
+            recovery: b.returnSum / b.n,
+            n: b.n
+        }));
+
+        // サンプル数で重み付けした最小二乗回帰 (y = slope*x + intercept)
+        let slope = null, intercept = null, r2 = null;
+        const usable = points.filter(p => p.n >= 3); // ノイズ除去
+        const W = usable.reduce((a, p) => a + p.n, 0);
+        if (usable.length >= 2 && W > 0) {
+            const mx = usable.reduce((a, p) => a + p.n * p.ev, 0) / W;
+            const my = usable.reduce((a, p) => a + p.n * p.recovery, 0) / W;
+            let sxx = 0, sxy = 0, syy = 0;
+            usable.forEach(p => {
+                sxx += p.n * (p.ev - mx) * (p.ev - mx);
+                sxy += p.n * (p.ev - mx) * (p.recovery - my);
+                syy += p.n * (p.recovery - my) * (p.recovery - my);
+            });
+            if (sxx > 0) {
+                slope = sxy / sxx;
+                intercept = my - slope * mx;
+                r2 = syy > 0 ? (sxy * sxy) / (sxx * syy) : null;
+            }
+        }
+        return { points, slope, intercept, r2, totalSamples: W };
+    }
+
+    let calibChartInstance = null;
+    function renderCalibration(calib) {
+        const readout = document.getElementById('calibReadout');
+        const ctx = document.getElementById('calibChart');
+        if (!ctx) return;
+
+        if (readout) {
+            if (calib.slope === null) {
+                readout.innerHTML = `<span class="text-slate-500">較正に十分なサンプルがありません（各EV帯 n≧3 が2帯以上必要）</span>`;
+            } else {
+                const dev = Math.abs(calib.slope - 1);
+                const color = dev <= 0.15 ? 'text-green-400' : (dev <= 0.4 ? 'text-yellow-400' : 'text-red-400');
+                const verdict = dev <= 0.15 ? '良好（EV式は概ね較正）' : (dev <= 0.4 ? '要観察' : '乖離大：EV式の見直しを推奨');
+                readout.innerHTML = `傾き <strong class="${color}">${calib.slope.toFixed(2)}</strong> / 切片 ${calib.intercept.toFixed(2)} / R² ${calib.r2 !== null ? calib.r2.toFixed(2) : '-'} <span class="${color}">— ${verdict}</span>`;
+            }
+        }
+
+        const evs = calib.points.map(p => p.ev);
+        const xMin = evs.length ? Math.min(...evs, 0) : 0;
+        const xMax = evs.length ? Math.max(...evs, 1.5) : 1.5;
+        const idealLine = [{ x: xMin, y: xMin }, { x: xMax, y: xMax }];
+        const datasets = [
+            {
+                type: 'scatter',
+                label: '実測（EV帯）',
+                data: calib.points.map(p => ({ x: p.ev, y: p.recovery, n: p.n })),
+                backgroundColor: 'rgba(34, 211, 238, 0.85)',
+                borderColor: '#22d3ee',
+                pointRadius: calib.points.map(p => Math.min(18, 3 + Math.sqrt(p.n))),
+                pointHoverRadius: calib.points.map(p => Math.min(20, 5 + Math.sqrt(p.n))),
+                order: 0
+            },
+            {
+                type: 'line',
+                label: '完全較正 y=x',
+                data: idealLine,
+                borderColor: 'rgba(148, 163, 184, 0.8)',
+                borderDash: [6, 6],
+                pointRadius: 0,
+                fill: false,
+                order: 2
+            }
+        ];
+        if (calib.slope !== null) {
+            datasets.push({
+                type: 'line',
+                label: `回帰直線 (傾き ${calib.slope.toFixed(2)})`,
+                data: [{ x: xMin, y: calib.slope * xMin + calib.intercept }, { x: xMax, y: calib.slope * xMax + calib.intercept }],
+                borderColor: '#f59e0b',
+                borderWidth: 2,
+                pointRadius: 0,
+                fill: false,
+                order: 1
+            });
+        }
+
+        if (calibChartInstance) calibChartInstance.destroy();
+        calibChartInstance = new Chart(ctx.getContext('2d'), {
+            type: 'scatter',
+            data: { datasets },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { labels: { color: '#e2e8f0', usePointStyle: true } },
+                    tooltip: {
+                        callbacks: {
+                            label: (c) => {
+                                if (c.dataset.type === 'scatter') {
+                                    const n = c.raw.n;
+                                    return `予測EV ${c.parsed.x.toFixed(2)} / 実回収 ${(c.parsed.y * 100).toFixed(0)}% (n=${n})`;
+                                }
+                                return `${c.dataset.label}: ${(c.parsed.y * 100).toFixed(0)}%`;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: { title: { display: true, text: '予測EV（倍率）', color: '#94a3b8' }, ticks: { color: '#94a3b8' }, grid: { color: 'rgba(51,65,85,0.5)' } },
+                    y: { title: { display: true, text: '実回収率（倍率, 1.0=100%）', color: '#94a3b8' }, ticks: { color: '#94a3b8' }, grid: { color: 'rgba(51,65,85,0.5)' } }
+                }
+            }
+        });
+    }
+
     let rankEvChartInstance = null;
 
     function initRankEvTabs(rows) {
@@ -2423,7 +2569,8 @@ document.addEventListener('DOMContentLoaded', () => {
 あなたは競馬投資モデル「SS-Engine」の改善提案者です。上の現行仕様と実績データ（および、このチャットに添付されたレース別データJSONがあればそれも）に基づき、改善案を出してください。
 1. 回収率の高い／低いクラス・推奨度・EV帯・環境条件（会場・距離・馬場）を特定する。
 2. それを踏まえ、変更すべきパラメータ（クラス境界EV、MAO係数、SS密度閾値、ユニット配分など）を「現行値 → 提案値」の形で具体的な数値で提案する。各案に必ず「根拠データ（該当する表の数値）」と「狙う効果」を添える。
-3. 最大ドローダウンを抑えつつ利益を最大化する資金配分（ケリー基準の調整）も提案する。
+3. 資金管理は定額フラット（1U=100円）＋1レース投入上限キャップが確定方針（ケリー比例は不採用）。上限キャップやバンクロール運用に調整余地があれば提案する。
+4. EV較正（添付JSONの evCalibration: 傾きslope）を確認する。傾きが1から大きく外れる場合は、個別パラメータより先にEV計算式（スコア配点・予想勝率の算出）の補正を最優先で提案する（H2）。
 出力形式: 提案リスト（各案: 対象 / 現行値 / 提案値 / 根拠 / 期待効果）。
 この回答（提案リスト全文）をコピーし、次は「Claude用コピー」を貼ったClaudeのチャットに貼り付けてください。
 `;
