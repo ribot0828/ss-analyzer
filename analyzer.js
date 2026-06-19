@@ -369,7 +369,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             let mao = 999;
             if (winRate > 0) {
-                if (['S0','S1','S2','A0','B0+','A1','B0'].includes(cls)) mao = 0.50 / winRate;
+                if (['S0','S1','S2','A0','B0+','A1','B0'].includes(cls)) mao = 0.60 / winRate; // Ver.5.3: 防御系係数 0.50→0.60
                 else if (['B1', 'B2', 'B3', 'A2', 'A3'].includes(cls)) mao = 0.90 / winRate;
                 else if (cls === 'X') mao = 3.00 / winRate;
                 else if (cls === 'D1') mao = 1.00 / winRate;
@@ -849,15 +849,6 @@ document.addEventListener('DOMContentLoaded', () => {
         };
     }
 
-    function calculateKelly(winRate, avgOdds) {
-        const p = winRate / 100;
-        const b = avgOdds - 1;
-        if (b <= 0) return 0;
-        const q = 1 - p;
-        const f = (b * p - q) / b;
-        return Math.max(0, f * 100);
-    }
-
     function calculateClassStats(data) {
         const groups = {};
         data.forEach(r => {
@@ -877,21 +868,17 @@ document.addEventListener('DOMContentLoaded', () => {
             const top2 = rows.filter(r => parseInt(r["着順"]) <= 2).length;
             const top3 = rows.filter(r => parseInt(r["着順"]) <= 3).length;
             const returns = rows.reduce((acc, r) => acc + (parseInt(r["着順"]) === 1 ? (parseFloat(r["最終確定オッズ"]) * 100) : 0), 0);
-            const oddsSum = rows.reduce((acc, r) => acc + (parseFloat(r["最終確定オッズ"]) || 0), 0);
-            const avgOdds = oddsSum / sample;
-            
+
             const roi = (returns / (sample * 100)) * 100;
             const winRate = (wins / sample) * 100;
-            const kelly = calculateKelly(winRate, avgOdds);
 
             return {
                 cls, sample, wins,
-                winRate, 
+                winRate,
                 top2, top2Rate: (top2 / sample) * 100,
-                top3, top3Rate: (top3 / sample) * 100, 
-                roi, 
-                avgEv: rows.reduce((acc, r) => acc + (parseFloat(r["最終確定期待値"]) || 0), 0) / sample,
-                kelly
+                top3, top3Rate: (top3 / sample) * 100,
+                roi,
+                avgEv: rows.reduce((acc, r) => acc + (parseFloat(r["最終確定期待値"]) || 0), 0) / sample
             };
         });
     }
@@ -1687,7 +1674,6 @@ document.addEventListener('DOMContentLoaded', () => {
                             <th>複勝率</th>
                             <th>回収率</th>
                             <th>平均EV</th>
-                            <th class="text-orange-400">Kelly推薦%</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -1700,7 +1686,6 @@ document.addEventListener('DOMContentLoaded', () => {
                                 <td>${s.top3Rate.toFixed(1)}% (${s.top3}/${s.sample})</td>
                                 <td class="${s.roi >= 100 ? 'text-green-400 font-bold' : ''}">${s.roi.toFixed(1)}%</td>
                                 <td>${s.avgEv.toFixed(3)}</td>
-                                <td class="font-bold ${s.kelly > 5 ? 'text-orange-400' : ''}">${s.kelly.toFixed(1)}%</td>
                             </tr>
                         `).join('')}
                     </tbody>
@@ -2364,13 +2349,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
 `;
 
-        md += `## 2. クラス別詳細レポート (Kelly推奨率)
+        md += `## 2. クラス別詳細レポート
 `;
-        md += `| クラス | サンプル | 的中率 | 連対率 | 複勝率 | 回収率 | EV | Kelly% |
-|---|---|---|---|---|---|---|---|
+        md += `| クラス | サンプル | 的中率 | 連対率 | 複勝率 | 回収率 | EV |
+|---|---|---|---|---|---|---|
 `;
         stats.forEach(s => {
-            md += `| ${s.cls} | ${s.sample} | ${s.winRate.toFixed(1)}% (${s.wins}/${s.sample}) | ${s.top2Rate.toFixed(1)}% (${s.top2}/${s.sample}) | ${s.top3Rate.toFixed(1)}% (${s.top3}/${s.sample}) | ${s.roi.toFixed(1)}% | ${s.avgEv.toFixed(3)} | **${s.kelly.toFixed(1)}%** |
+            md += `| ${s.cls} | ${s.sample} | ${s.winRate.toFixed(1)}% (${s.wins}/${s.sample}) | ${s.top2Rate.toFixed(1)}% (${s.top2}/${s.sample}) | ${s.top3Rate.toFixed(1)}% (${s.top3}/${s.sample}) | ${s.roi.toFixed(1)}% | ${s.avgEv.toFixed(3)} |
 `;
         });
 
@@ -2420,7 +2405,7 @@ document.addEventListener('DOMContentLoaded', () => {
   - X: D かつ 3.000〜3.999 ／ D1: D かつ 1.300〜1.799
   - 上記いずれにも該当しなければ N（買い目対象外）
 - 系統: Place-Core/軸・防御 = {S0,S1,S2,A0,B0+,A1,B0}／ Win-Core/攻撃 = {A3,B2,A2,B1,D1,B3,X}
-- MAO（最低必要オッズ）: 防御系=0.50÷勝率, 攻撃系(B1,B2,B3,A2,A3)=0.90÷勝率, X=3.00÷勝率, D1=1.00÷勝率
+- MAO（最低必要オッズ）: 防御系=0.60÷勝率, 攻撃系(B1,B2,B3,A2,A3)=0.90÷勝率, X=3.00÷勝率, D1=1.00÷勝率
 - 琥珀監査(Amber)通過条件: X・D1 → オッズ≧MAO ／ その他 → オッズ≧MAO×1.2
 - SS密度 = (EV≧1.300 かつ 評価∈{S,A,B,D} の頭数) ÷ max(12, 出走頭数)
 - 推奨度: 密度≧0.250 かつ S0/S1あり→SSS ／ 密度≧0.250 かつ 軸あり→SS ／ 密度≧0.150→S ／ それ未満→Low
