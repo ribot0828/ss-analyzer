@@ -286,9 +286,15 @@ document.addEventListener('DOMContentLoaded', () => {
             initRankEvTabs(rowsWithRank);
             renderRankEvAnalysis('S', rowsWithRank);
 
-            const calibration = calculateCalibration(rowsWithRank);
-            renderCalibration(calibration);
-            window.latestCalibration = calibration;
+            calibRows = rowsWithRank;
+            initCalibTabs();
+            setCalibFilter(activeCalibFilter); // デフォルト: Win-Core（単勝買い目）
+            // JSON出力用には Win-Core（本命）と 全馬（参考）の両方を保持
+            window.latestCalibration = {
+                basis: 'winCore_primary',
+                winCore: calculateCalibration(filterCalibRows(rowsWithRank, 'wincore')),
+                all: calculateCalibration(filterCalibRows(rowsWithRank, 'all'))
+            };
 
             const outliers = detectOutliers(rowsWithRank);
             renderOutliers(outliers);
@@ -1382,11 +1388,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 oddsBinAnalysis: oddsBinAnalysis,
                 classPerformance: classPerformance,
                 // H2: EV較正（予測EV vs 実回収率）。slope≈1 なら較正済み、1から外れるほどEV式の見直し優先度↑
+                // winCore=単勝買い目クラスのみ（本命）。all=N等を含む全馬の生EV参考値。
                 evCalibration: window.latestCalibration ? {
-                    slope: window.latestCalibration.slope,
-                    intercept: window.latestCalibration.intercept,
-                    r2: window.latestCalibration.r2,
-                    points: window.latestCalibration.points
+                    winCore: window.latestCalibration.winCore || null,
+                    all: window.latestCalibration.all || null
                 } : null
             };
 
@@ -2090,6 +2095,40 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- EV較正分析 (H2): 予測EV vs 実回収率 ---
+    let calibRows = [];
+    let activeCalibFilter = 'wincore';
+    const CALIB_LABELS = { wincore: 'Win-Core（単勝買い目）', placecore: 'Place-Core（三連複軸）', bet: '買い目クラス全体', all: '全馬（生EV）' };
+
+    function filterCalibRows(rows, key) {
+        if (key === 'all') return rows || [];
+        const clsOf = r => (r["最終確定クラス"] || r["購入時クラス"] || "").trim();
+        if (key === 'wincore') return (rows || []).filter(r => WIN_CORE_CLASSES.includes(clsOf(r)));
+        if (key === 'placecore') return (rows || []).filter(r => PLACE_CORE_CLASSES_FULL.includes(clsOf(r)));
+        if (key === 'bet') return (rows || []).filter(r => { const c = clsOf(r); return WIN_CORE_CLASSES.includes(c) || PLACE_CORE_CLASSES_FULL.includes(c); });
+        return rows || [];
+    }
+
+    function setCalibFilter(key) {
+        activeCalibFilter = key;
+        document.querySelectorAll('.calib-filter-btn').forEach(b => {
+            const on = b.getAttribute('data-filter') === key;
+            b.classList.toggle('bg-cyan-600', on);
+            b.classList.toggle('text-white', on);
+            b.classList.toggle('bg-slate-800', !on);
+            b.classList.toggle('text-slate-300', !on);
+        });
+        const calib = calculateCalibration(filterCalibRows(calibRows, key));
+        renderCalibration(calib, CALIB_LABELS[key] || key);
+    }
+
+    function initCalibTabs() {
+        document.querySelectorAll('.calib-filter-btn').forEach(btn => {
+            const nb = btn.cloneNode(true);
+            btn.parentNode.replaceChild(nb, btn);
+            nb.addEventListener('click', () => setCalibFilter(nb.getAttribute('data-filter')));
+        });
+    }
+
     function calculateCalibration(rows) {
         // EV帯 0.25刻み（0.0〜3.0）+ 3.0以上。較正はサンプル確保が重要なので粗めに区切る
         const bins = [];
@@ -2140,19 +2179,20 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     let calibChartInstance = null;
-    function renderCalibration(calib) {
+    function renderCalibration(calib, basisLabel) {
         const readout = document.getElementById('calibReadout');
         const ctx = document.getElementById('calibChart');
         if (!ctx) return;
 
+        const basis = basisLabel ? `<span class="text-cyan-400 font-bold">${basisLabel}</span> (n=${calib.totalSamples || 0})　` : '';
         if (readout) {
             if (calib.slope === null) {
-                readout.innerHTML = `<span class="text-slate-500">較正に十分なサンプルがありません（各EV帯 n≧3 が2帯以上必要）</span>`;
+                readout.innerHTML = `${basis}<span class="text-slate-500">較正に十分なサンプルがありません（各EV帯 n≧3 が2帯以上必要）</span>`;
             } else {
                 const dev = Math.abs(calib.slope - 1);
                 const color = dev <= 0.15 ? 'text-green-400' : (dev <= 0.4 ? 'text-yellow-400' : 'text-red-400');
                 const verdict = dev <= 0.15 ? '良好（EV式は概ね較正）' : (dev <= 0.4 ? '要観察' : '乖離大：EV式の見直しを推奨');
-                readout.innerHTML = `傾き <strong class="${color}">${calib.slope.toFixed(2)}</strong> / 切片 ${calib.intercept.toFixed(2)} / R² ${calib.r2 !== null ? calib.r2.toFixed(2) : '-'} <span class="${color}">— ${verdict}</span>`;
+                readout.innerHTML = `${basis}傾き <strong class="${color}">${calib.slope.toFixed(2)}</strong> / 切片 ${calib.intercept.toFixed(2)} / R² ${calib.r2 !== null ? calib.r2.toFixed(2) : '-'} <span class="${color}">— ${verdict}</span>`;
             }
         }
 
@@ -2570,7 +2610,7 @@ document.addEventListener('DOMContentLoaded', () => {
 1. 回収率の高い／低いクラス・推奨度・EV帯・環境条件（会場・距離・馬場）を特定する。
 2. それを踏まえ、変更すべきパラメータ（クラス境界EV、MAO係数、SS密度閾値、ユニット配分など）を「現行値 → 提案値」の形で具体的な数値で提案する。各案に必ず「根拠データ（該当する表の数値）」と「狙う効果」を添える。
 3. 資金管理は定額フラット（1U=100円）＋1レース投入上限キャップが確定方針（ケリー比例は不採用）。上限キャップやバンクロール運用に調整余地があれば提案する。
-4. EV較正（添付JSONの evCalibration: 傾きslope）を確認する。傾きが1から大きく外れる場合は、個別パラメータより先にEV計算式（スコア配点・予想勝率の算出）の補正を最優先で提案する（H2）。
+4. EV較正を確認する（添付JSONの evCalibration.winCore.slope = 単勝買い目クラスのみで計算した較正傾き。allはN等を含む参考値）。winCoreの傾きが1から大きく外れる場合は、個別パラメータより先にEV計算式（スコア配点・予想勝率の算出）の補正を最優先で提案する（H2）。
 出力形式: 提案リスト（各案: 対象 / 現行値 / 提案値 / 根拠 / 期待効果）。
 この回答（提案リスト全文）をコピーし、次は「Claude用コピー」を貼ったClaudeのチャットに貼り付けてください。
 `;

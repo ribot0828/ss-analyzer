@@ -174,7 +174,13 @@
                         </h3>
                         <div id="calibReadout" class="text-sm text-slate-300"></div>
                     </div>
-                    <p class="text-xs text-slate-500 mb-3">点線=完全較正(y=x)。実線=回帰直線。傾きが1から大きく外れる場合はEV式の見直しが最優先（H2）。点の大きさ=サンプル数。</p>
+                    <div class="flex flex-wrap gap-2 mb-3" id="calib-filter-tabs">
+                        <button data-filter="wincore" class="calib-filter-btn px-3 py-1.5 rounded-lg text-sm font-bold bg-cyan-600 text-white shadow transition-all">Win-Core(単勝買い目)</button>
+                        <button data-filter="placecore" class="calib-filter-btn px-3 py-1.5 rounded-lg text-sm font-bold bg-slate-800 text-slate-300 hover:bg-slate-700 transition-all">Place-Core(三連複軸)</button>
+                        <button data-filter="bet" class="calib-filter-btn px-3 py-1.5 rounded-lg text-sm font-bold bg-slate-800 text-slate-300 hover:bg-slate-700 transition-all">買い目クラス全体</button>
+                        <button data-filter="all" class="calib-filter-btn px-3 py-1.5 rounded-lg text-sm font-bold bg-slate-800 text-slate-300 hover:bg-slate-700 transition-all">全馬(生EV)</button>
+                    </div>
+                    <p class="text-xs text-slate-500 mb-3">点線=完全較正(y=x)。実線=回帰直線。傾きが1から大きく外れる場合はEV式の見直しが最優先（H2）。点の大きさ=サンプル数。<br>※単勝の較正は<strong class="text-cyan-400">Win-Core</strong>が本命（Place-Coreは単勝EVを追う買い目ではない）。「全馬」はN等を含む生EVメトリクスの参考値。</p>
                     <div class="chart-container" style="height: 380px; width: 100%;">
                         <canvas id="calibChart"></canvas>
                     </div>
