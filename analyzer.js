@@ -633,9 +633,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (cls === 'B2') return 3;
                 return 2;
             } else if (rec === 'S') {
-                if (cls === 'A3') return 3;
-                if (cls === 'B2') return 2;
-                return 1;
+                if (cls === 'A3') return 5;
+                if (cls === 'B2') return 3;
+                return 2;
             } else { // Low
                 if (cls === 'A3') return 1;
                 if (cls === 'B2') return 1;
