@@ -161,6 +161,24 @@ document.addEventListener('DOMContentLoaded', () => {
         return `${row["日付"]}_${row["レース名"]}_${row["コース詳細"]}`;
     }
 
+    // 払戻パース: '1090円'→{pay:1090,key:null} / '12: 6,700円'→{pay:6700,key:"12"} / '1-3-5: 5930円'→{pay:5930,key:"1-3-5"}
+    // ※2026-06-06以降のCSVは「馬番(or組): 金額円」形式。parseFloatだと先頭数字を誤読するため専用パーサで処理。
+    function parseColonPayout(raw) {
+        if (raw == null) return { pay: 0, key: null };
+        const s = String(raw).trim();
+        if (!s || s === '-') return { pay: 0, key: null };
+        if (s.includes(':') || s.includes('：')) {
+            const parts = s.split(/[:：]/);
+            const key = (parts[0] || '').replace(/[^0-9-]/g, '');
+            const pay = parseInt((parts.slice(1).join(':') || '').replace(/[^0-9]/g, ''), 10) || 0;
+            return { pay, key: key || null };
+        }
+        const m = s.match(/([\d,]+)\s*円/);
+        if (m) return { pay: parseInt(m[1].replace(/,/g, ''), 10) || 0, key: null };
+        const p = parseInt(s.replace(/[^0-9]/g, ''), 10) || 0;
+        return { pay: p, key: null };
+    }
+
     function addFileBadge(name, count) {
         const badge = document.createElement('div');
         badge.className = 'status-badge status-info text-xs';
@@ -432,10 +450,10 @@ document.addEventListener('DOMContentLoaded', () => {
         
         // 優先順位の定数定義（念のため関数内に明記）
         const PLACE_CORE_CLASSES = ['S0', 'S1', 'S2', 'A0', 'B0+', 'A1', 'B0'];
-        const WIN_CORE_CLASSES = ['A3', 'B2', 'A2', 'B1', 'D1', 'B3', 'X'];
-        const WIN_PRIORITY_LOCAL = ['A3', 'B2', 'A2', 'B1', 'D1', 'B3', 'X'];
+        const WIN_CORE_CLASSES = ['A3', 'B2', 'A2', 'D1', 'B1', 'B3', 'X'];
+        const WIN_PRIORITY_LOCAL = ['A3', 'B2', 'A2', 'D1', 'B1', 'B3', 'X']; // [10] D1>B1
         const TRIO_ROW2_DEFENSE_LOCAL = ['S0', 'S1', 'S2', 'A0', 'B0+', 'A1', 'B0'];
-        const TRIO_ROW2_ATTACK_LOCAL = ['A3', 'B2', 'A2', 'B1', 'D1', 'B3', 'X'];
+        const TRIO_ROW2_ATTACK_LOCAL = ['A3', 'B2', 'A2', 'D1', 'B1', 'B3', 'X']; // [10] D1>B1
 
         const hasAxis = classes.some(c => PLACE_CORE_CLASSES.includes(c));
         const isGraded = raceHorses[0] && ((raceHorses[0]["グレード・頭数"] || "").includes("G") || (raceHorses[0]["グレード・頭数"] || "").includes("重賞"));
@@ -543,48 +561,24 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 }
 
-                // 3列目 (網) の構築
-                // ソート関数定義
-                const sortDefense = pureEvSort; // 新防御ソート
-                const sortN = (a, b) => {
-                    if (a.expectedWinRate !== b.expectedWinRate) return b.expectedWinRate - a.expectedWinRate;
-                    return parseInt(b["馬番"]) - parseInt(a["馬番"]);
-                };
-                const addToRow3 = (list) => { list.forEach(h => { if (!row3.includes(h)) row3.push(h); }); };
-                
-                // 1. 2列目の全馬（ソート不要、そのまま追加）
-                addToRow3(row2);
-                
-                // 2. 評価Sの全馬（ただしNクラスは除外 / sortDefense）
-                let sRanked = raceHorses.filter(h => h !== axisHorse && (h["評価"] || "").toUpperCase().trim() === 'S' && (h["最終確定クラス"] || h["購入時クラス"] || "").trim() !== 'N');
-                sRanked.sort(sortDefense);
-                addToRow3(sRanked);
-                
-                // 3. Place-Core系の全馬（sortDefense適用）
-                let placeCoreCands = raceHorses.filter(h => h !== axisHorse && PLACE_CORE_CLASSES.includes((h["最終確定クラス"] || h["購入時クラス"] || "").trim()));
-                placeCoreCands.sort(sortDefense);
-                addToRow3(placeCoreCands);
-
-                // 3. Win-Core系の全馬（優先順位順にattackSort適用）
-                for (let c of TRIO_ROW2_ATTACK_LOCAL) {
-                    let cands = raceHorses.filter(h => h !== axisHorse && (h["最終確定クラス"] || h["購入時クラス"] || "").trim() === c);
-                    if (cands.length > 0) {
-                        cands.sort(attackSort);
-                        addToRow3(cands);
-                    }
-                }
-
-                row3Array = row3.slice(0, 10); // 最大10頭
-
-                // 組み合わせの生成
-                row2.forEach(h2 => {
-                    row3Array.forEach(h3 => {
+                // [12] 三連複 軸1頭ながし: 網を撤廃。買い目 = 軸 × C(相手row2, 2)。上限3点
+                // row2 が「相手」（最大3頭）。row3(網)は生成しない。
+                row3Array = []; // 網は廃止（UI互換のため空配列を維持）
+                for (let i = 0; i < row2.length; i++) {
+                    for (let j = i + 1; j < row2.length; j++) {
+                        const h2 = row2[i], h3 = row2[j];
                         if (h2 !== h3 && h2 !== axisHorse && h3 !== axisHorse) {
                             const trio = [parseInt(axisHorse["馬番"]), parseInt(h2["馬番"]), parseInt(h3["馬番"])].sort((a,b) => a-b).join('-');
                             finalTrioCombos.add(trio);
                         }
-                    });
+                    }
+                }
+                // 自己検査: 全買い目に軸を含む & 点数<=3
+                const axisNo = parseInt(axisHorse["馬番"]);
+                finalTrioCombos.forEach(t => {
+                    if (!t.split('-').map(Number).includes(axisNo)) console.error('[三連複] 軸欠落:', t);
                 });
+                if (finalTrioCombos.size > 3) console.error('[三連複] 点数超過:', finalTrioCombos.size);
             }
         }
 
@@ -602,10 +596,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     actualWinPayoutMap[h["馬番"]] = Math.round(odds * 10) * 10;
                 }
             } else {
-                // それ以降はCSVの値を優先
-                const wVal = parseFloat(h["単勝払戻"]);
-                if (!isNaN(wVal) && wVal > 0) {
-                    actualWinPayoutMap[h["馬番"]] = wVal;
+                // それ以降はCSVの値を優先（コロン形式 '馬番: 金額円' を正しく解釈）
+                const w = parseColonPayout(h["単勝払戻"]);
+                if (w.key !== null && w.pay > 0) {
+                    actualWinPayoutMap[w.key] = w.pay;        // 勝ち馬の馬番に紐付け
+                } else if (w.pay > 0) {
+                    actualWinPayoutMap[h["馬番"]] = w.pay;     // 旧レース値形式
                 } else if (parseInt(h["着順"]) === 1) {
                     // フォールバック
                     const odds = parseFloat(h["最終確定オッズ"]) || parseFloat(h["購入時オッズ"]) || 0;
@@ -613,8 +609,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
 
-            const tVal = parseFloat(h["三連複払戻"]);
-            if (!isNaN(tVal) && tVal > 0) actualTrioPayout = tVal;
+            const tPay = parseColonPayout(h["三連複払戻"]).pay; // '1-3-5: 5930円'→5930
+            if (tPay > 0) actualTrioPayout = tPay;
         });
 
         let winInvest = 0;
@@ -623,25 +619,17 @@ document.addEventListener('DOMContentLoaded', () => {
         let amberFailReturn = 0;
 
         const rec = determineRecommendation(raceHorses);
-        const getUnits = (cls) => {
-            if (rec === 'SSS') {
-                if (cls === 'A3') return 6;
-                if (cls === 'B2') return 4;
-                return 2;
-            } else if (rec === 'SS') {
-                if (cls === 'A3') return 5;
-                if (cls === 'B2') return 3;
-                return 2;
-            } else if (rec === 'S') {
-                if (cls === 'A3') return 5;
-                if (cls === 'B2') return 3;
-                return 2;
-            } else { // Low
-                if (cls === 'A3') return 1;
-                if (cls === 'B2') return 1;
-                return 1;
-            }
+        // [8][9] 単勝ロット適正化（推奨度×クラス）
+        const UNIT_TABLE = {
+            'A3': { SSS: 6, SS: 5, S: 5, Low: 1 },
+            'B2': { SSS: 3, SS: 2, S: 2, Low: 1 }, // [9]
+            'A2': { SSS: 2, SS: 2, S: 2, Low: 1 },
+            'B1': { SSS: 1, SS: 1, S: 1, Low: 1 }, // [8] 全推奨度1U
+            'D1': { SSS: 1, SS: 1, S: 1, Low: 1 },
+            'B3': { SSS: 1, SS: 1, S: 1, Low: 1 },
+            'X':  { SSS: 1, SS: 1, S: 1, Low: 1 }
         };
+        const getUnits = (cls) => (UNIT_TABLE[cls] && UNIT_TABLE[cls][rec]) || 1;
 
         finalWinBets.forEach(h => {
             const cls = (h["最終確定クラス"] || h["購入時クラス"] || "").trim();
@@ -2469,8 +2457,8 @@ document.addEventListener('DOMContentLoaded', () => {
             let raceReturn = 0;
             let actualTrioPayout = 0;
             horses.forEach(h => {
-                const tVal = parseFloat(h["三連複払戻"]);
-                if (!isNaN(tVal) && tVal > 0) actualTrioPayout = tVal;
+                const tPay = parseColonPayout(h["三連複払戻"]).pay; // コロン形式 '1-3-5: 5930円' 対応
+                if (tPay > 0) actualTrioPayout = tPay;
             });
 
             if (winners.length >= 3) {
