@@ -622,7 +622,6 @@ document.addEventListener('DOMContentLoaded', () => {
         let amberFailInvest = 0;
         let amberFailReturn = 0;
 
-        const rec = determineRecommendation(raceHorses);
         // [8][9] 単勝ロット適正化（推奨度×クラス）
         const UNIT_TABLE = {
             'A3': { SSS: 6, SS: 5, S: 5, Low: 0 },
