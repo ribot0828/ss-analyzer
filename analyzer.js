@@ -460,7 +460,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const hasAxis = classes.some(c => PLACE_CORE_CLASSES.includes(c));
         const isGraded = raceHorses[0] && ((raceHorses[0]["グレード・頭数"] || "").includes("G") || (raceHorses[0]["グレード・頭数"] || "").includes("重賞"));
         const minDensity = isGraded ? 0.100 : 0.150;
-        const skipTrio = !hasAxis || density < minDensity;
+        const rec = determineRecommendation(raceHorses);
+        const baseSkipTrio = !hasAxis || density < minDensity;
+        const skipTrio = baseSkipTrio || rec === 'S' || rec === 'Low';
 
         // 【攻撃ソート関数】EV差が0.100以内なら馬番が小さい方（内枠）を優先、それ以外はEV低を優先
         const attackSort = (a, b) => {
@@ -517,7 +519,7 @@ document.addEventListener('DOMContentLoaded', () => {
         let row3 = [];
         let row3Array = [];
 
-        if (!skipTrio) {
+        if (!baseSkipTrio) {
             // 軸の選定（優先順位順に探し、同クラスなら防御ソート=純粋EV）
             for (let c of PLACE_CORE_CLASSES) {
                 let cands = raceHorses.filter(h => (h["最終確定クラス"] || h["購入時クラス"] || "").trim() === c);
@@ -623,15 +625,19 @@ document.addEventListener('DOMContentLoaded', () => {
         const rec = determineRecommendation(raceHorses);
         // [8][9] 単勝ロット適正化（推奨度×クラス）
         const UNIT_TABLE = {
-            'A3': { SSS: 6, SS: 5, S: 5, Low: 1 },
-            'B2': { SSS: 3, SS: 2, S: 2, Low: 1 }, // [9]
-            'A2': { SSS: 2, SS: 2, S: 2, Low: 1 },
-            'B1': { SSS: 1, SS: 1, S: 1, Low: 1 }, // [8] 全推奨度1U
-            'D1': { SSS: 1, SS: 1, S: 1, Low: 1 },
-            'B3': { SSS: 1, SS: 1, S: 1, Low: 1 },
-            'X':  { SSS: 1, SS: 1, S: 1, Low: 1 }
+            'A3': { SSS: 6, SS: 5, S: 5, Low: 0 },
+            'B2': { SSS: 3, SS: 2, S: 2, Low: 0 }, // [9]
+            'A2': { SSS: 2, SS: 2, S: 2, Low: 0 },
+            'B1': { SSS: 1, SS: 1, S: 1, Low: 0 }, // [8] 全推奨度1U (Low=0)
+            'D1': { SSS: 1, SS: 1, S: 1, Low: 0 },
+            'B3': { SSS: 1, SS: 1, S: 1, Low: 0 },
+            'X':  { SSS: 1, SS: 1, S: 1, Low: 0 }
         };
-        const getUnits = (cls) => (UNIT_TABLE[cls] && UNIT_TABLE[cls][rec]) || 1;
+        const getUnits = (cls) => {
+            if (rec === 'Low') return 0;
+            const entry = UNIT_TABLE[cls] && UNIT_TABLE[cls][rec];
+            return entry !== undefined ? entry : 1;
+        };
 
         finalWinBets.forEach(h => {
             const cls = (h["最終確定クラス"] || h["購入時クラス"] || "").trim();
@@ -689,10 +695,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (trioHit) trioReturn = actualTrioPayout;
             }
 
+        const refTrioInvest = finalTrioCombos.size * 100;
+        const refTrioReturn = trioReturn;
+
         return {
             id: raceId,
             horses: raceHorses,
-            rec: determineRecommendation(raceHorses),
+            rec: rec,
             ssDensity: density,
             skipTrio: skipTrio,
             axisHorse: axisHorse,
@@ -700,12 +709,14 @@ document.addEventListener('DOMContentLoaded', () => {
             row3: row3Array,
             finalWinBets: finalWinBets,
             amberFailBets: amberFailBets,
-            winInvest: winInvest,
-            winReturn: winReturn,
+            winInvest: rec === 'Low' ? 0 : winInvest,
+            winReturn: rec === 'Low' ? 0 : winReturn,
             amberFailInvest: amberFailInvest,
             amberFailReturn: amberFailReturn,
-            trioInvest: finalTrioCombos.size * 100,
-            trioReturn: trioReturn
+            trioInvest: skipTrio ? 0 : refTrioInvest,
+            trioReturn: skipTrio ? 0 : refTrioReturn,
+            refTrioInvest: refTrioInvest,
+            refTrioReturn: refTrioReturn
         };
     }
 
@@ -957,7 +968,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return order.map(rec => {
             const races = simulatedRaces.filter(r => r.rec === rec);
             const raceCount = races.length;
-            if (raceCount === 0) return { rec, raceCount: 0, winInvest: 0, winROI: 0, winHits: 0, winBetRaces: 0, trioInvest: 0, trioROI: 0, trioHits: 0, trioBetRaces: 0, totalInvest: 0, totalROI: 0 };
+            if (raceCount === 0) return { rec, raceCount: 0, winInvest: 0, winROI: 0, winHits: 0, winBetRaces: 0, trioInvest: 0, trioROI: 0, trioHits: 0, trioBetRaces: 0, totalInvest: 0, totalROI: 0, refTrioInvest: 0, refTrioROI: 0, refTrioHits: 0, refTrioBetRaces: 0 };
 
             let winInvest = 0;
             let winReturn = 0;
@@ -967,6 +978,10 @@ document.addEventListener('DOMContentLoaded', () => {
             let winBetRaces = 0;
             let trioHits = 0;
             let trioBetRaces = 0;
+            let refTrioInvest = 0;
+            let refTrioReturn = 0;
+            let refTrioHits = 0;
+            let refTrioBetRaces = 0;
 
             races.forEach(r => {
                 winInvest += r.winInvest;
@@ -981,14 +996,21 @@ document.addEventListener('DOMContentLoaded', () => {
                     trioBetRaces++;
                     if (r.trioReturn > 0) trioHits++;
                 }
+                if (r.refTrioInvest > 0) {
+                    refTrioInvest += r.refTrioInvest;
+                    refTrioReturn += r.refTrioReturn;
+                    refTrioBetRaces++;
+                    if (r.refTrioReturn > 0) refTrioHits++;
+                }
             });
 
             const winROI = winInvest > 0 ? (winReturn / winInvest) * 100 : 0;
             const trioROI = trioInvest > 0 ? (trioReturn / trioInvest) * 100 : 0;
             const totalInvest = winInvest + trioInvest;
             const totalROI = totalInvest > 0 ? ((winReturn + trioReturn) / totalInvest) * 100 : 0;
+            const refTrioROI = refTrioInvest > 0 ? (refTrioReturn / refTrioInvest) * 100 : 0;
 
-            return { rec, raceCount, winInvest, winROI, winHits, winBetRaces, trioInvest, trioROI, trioHits, trioBetRaces, totalInvest, totalROI };
+            return { rec, raceCount, winInvest, winROI, winHits, winBetRaces, trioInvest, trioROI, trioHits, trioBetRaces, totalInvest, totalROI, refTrioInvest, refTrioROI, refTrioHits, refTrioBetRaces };
         }).filter(s => s.raceCount > 0);
     }
 
@@ -1013,20 +1035,24 @@ document.addEventListener('DOMContentLoaded', () => {
                         </tr>
                     </thead>
                     <tbody>
-                        ${stats.map(s => `
+                        ${stats.map(s => {
+                            const isSkippedTrio = (s.rec === 'S' || s.rec === 'Low');
+                            const trioLabel = isSkippedTrio && s.refTrioInvest > 0
+                                ? `<span class="text-slate-500" title="参照値（実際はスキップ）">（参照: ${s.refTrioROI.toFixed(1)}%）</span>`
+                                : '';
+                            return `
                             <tr>
-                                <td class="font-bold ${recColors[s.rec] || ''}">${s.rec}</td>
+                                <td class="font-bold ${recColors[s.rec] || ''}">${s.rec}${isSkippedTrio ? ' <span class="text-xs text-slate-500">単勝のみ</span>' : ''}</td>
                                 <td>${s.raceCount}</td>
                                 <td>${s.winInvest.toLocaleString()}円</td>
                                 <td>${fmtHitRate(s.winHits, s.winBetRaces)}</td>
                                 <td class="${s.winROI >= 100 ? 'text-green-400 font-bold' : ''}">${s.winROI.toFixed(1)}%</td>
                                 <td>${s.trioInvest.toLocaleString()}円</td>
                                 <td>${fmtHitRate(s.trioHits, s.trioBetRaces)}</td>
-                                <td class="${s.trioROI >= 100 ? 'text-green-400 font-bold' : ''}">${s.trioROI.toFixed(1)}%</td>
+                                <td class="${s.trioROI >= 100 ? 'text-green-400 font-bold' : ''}">${s.trioROI.toFixed(1)}% ${trioLabel}</td>
                                 <td>${s.totalInvest.toLocaleString()}円</td>
                                 <td class="${s.totalROI >= 100 ? 'text-green-400 font-bold' : ''}">${s.totalROI.toFixed(1)}%</td>
-                            </tr>
-                        `).join('')}
+                            </tr>`}).join('')}
                     </tbody>
                 </table>
             </div>
@@ -1122,11 +1148,14 @@ document.addEventListener('DOMContentLoaded', () => {
                             hitRate: rs?.totalBetRaces > 0 ? (rs.totalHits / rs.totalBetRaces) * 100 : 0.0,
                             recoveryRate: rs?.totalROI || 0.0,
                             winRecoveryRate: rs?.winROI || 0.0,
-                            wideRecoveryRate: 0.0, // ワイドは現在シミュレーション対象外のため0固定
+                            wideRecoveryRate: 0.0,
                             trifectaRecoveryRate: rs?.trioROI || 0.0,
                             winHitRate: rs?.winBetRaces > 0 ? (rs.winHits / rs.winBetRaces) * 100 : 0.0,
                             wideHitRate: 0.0,
-                            trifectaHitRate: rs?.trioBetRaces > 0 ? (rs.trioHits / rs.trioBetRaces) * 100 : 0.0
+                            trifectaHitRate: rs?.trioBetRaces > 0 ? (rs.trioHits / rs.trioBetRaces) * 100 : 0.0,
+                            refTrifectaRecoveryRate: rs?.refTrioROI || 0.0,
+                            refTrifectaHitRate: rs?.refTrioBetRaces > 0 ? (rs.refTrioHits / rs.refTrioBetRaces) * 100 : 0.0,
+                            refTrifectaInvest: rs?.refTrioInvest || 0
                         };
                     }
                 });
