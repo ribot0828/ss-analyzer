@@ -75,11 +75,11 @@ document.addEventListener('DOMContentLoaded', () => {
     dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('dragover'); });
     dropzone.addEventListener('dragleave', () => { dropzone.classList.remove('dragover'); });
     dropzone.addEventListener('drop', (e) => { e.preventDefault(); dropzone.classList.remove('dragover'); handleFiles(e.dataTransfer.files); });
+    const fileInput = document.getElementById('fileInput');
+    fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
     dropzone.addEventListener('click', () => {
-        const input = document.createElement('input');
-        input.type = 'file'; input.multiple = true; input.accept = '.csv';
-        input.onchange = (e) => handleFiles(e.target.files);
-        input.click();
+        fileInput.value = '';
+        fileInput.click();
     });
 
     async function handleFiles(files) {
