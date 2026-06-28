@@ -38,8 +38,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let availableClasses = [];
 
     const EXPECTED_HEADERS = [
-        "日付", "レース名", "コース詳細", "グレード・頭数", "馬番", "馬名", "購入時人気", "購入時オッズ", 
-        "評価", "購入時期待値", "購入時クラス", "最終確定人気", "最終確定オッズ", "最終確定期待値", 
+        "日付", "開催場所", "レース名", "コース詳細", "グレード・頭数", "馬番", "馬名", "購入時人気", "購入時オッズ",
+        "評価", "購入時期待値", "購入時クラス", "最終確定人気", "最終確定オッズ", "最終確定期待値",
         "最終確定クラス", "着順", "MAO", "実行フラグ", "単勝払戻", "ワイド払戻", "三連複払戻", "三連単払戻"
     ];
 
@@ -107,9 +107,11 @@ document.addEventListener('DOMContentLoaded', () => {
             const normalizedRow = detectAndMapLegacy(row);
             if (!normalizedRow["レース名"] || !normalizedRow["馬番"]) return;
             
-            // Add custom extracted fields
             const ctx = parseCourseDetail(normalizedRow["コース詳細"]);
             Object.assign(normalizedRow, ctx);
+            if (normalizedRow["開催場所"] && normalizedRow["開催場所"].trim() && normalizedRow["開催場所"].trim() !== "-") {
+                normalizedRow.venue = normalizedRow["開催場所"].trim();
+            }
 
             // 近走監査の読み取りとauditStatus付与
             const auditRaw = (normalizedRow["近走監査"] || "").trim();
