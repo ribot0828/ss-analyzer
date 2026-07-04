@@ -13,16 +13,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const riskDashboard = document.getElementById('risk-dashboard');
     const analysisResultArea = document.getElementById('analysisResultArea');
     const recommendationResultArea = document.getElementById('recommendationResultArea');
-    const simulatorResultArea = document.getElementById('simulatorResultArea');
-    const simChartContainer = document.getElementById('simChartContainer');
-    const outlierResultArea = document.getElementById('outlierResultArea');
     const geminiOutput = document.getElementById('geminiOutput');
     const claudeOutput = document.getElementById('claudeOutput');
     const geminiExportSection = document.getElementById('geminiExportSection');
     const copyGeminiBtn = document.getElementById('copyGeminiBtn');
     const copyClaudeBtn = document.getElementById('copyClaudeBtn');
     const toast = document.getElementById('toast');
-    const runSimulatorBtn = document.getElementById('runSimulatorBtn');
 
     // Filters
     const filterVenue = document.getElementById('filter-venue');
@@ -34,8 +30,6 @@ document.addEventListener('DOMContentLoaded', () => {
     let allData = new Map(); 
     let filteredData = [];
     let equityChartInstance = null;
-    let simChartInstance = null;
-    let availableClasses = [];
 
     const EXPECTED_HEADERS = [
         "日付", "開催場所", "レース名", "コース詳細", "グレード・頭数", "馬番", "馬名", "購入時人気", "購入時オッズ",
@@ -233,11 +227,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const data = Array.from(allData.values());
         const venues = [...new Set(data.map(d => d.venue))].filter(v => v && v !== "-").sort();
         const conditions = [...new Set(data.map(d => d.condition))].filter(c => c && c !== "-").sort();
-        availableClasses = [...new Set(data.map(d => d["最終確定クラス"] || d["購入時クラス"]))].filter(c => c).sort();
 
         updateSelect(filterVenue, venues);
         updateSelect(filterCondition, conditions);
-        populateSimulatorClasses();
     }
 
     function updateSelect(el, items) {
@@ -249,20 +241,6 @@ document.addEventListener('DOMContentLoaded', () => {
             el.appendChild(opt);
         });
         el.value = current;
-    }
-
-    function populateSimulatorClasses() {
-        const containers = ['sim-row1-classes', 'sim-row2-classes', 'sim-row3-classes'];
-        containers.forEach(cid => {
-            const container = document.getElementById(cid);
-            container.innerHTML = '';
-            availableClasses.forEach(c => {
-                const label = document.createElement('label');
-                label.className = 'flex items-center gap-1 cursor-pointer hover:text-blue-400';
-                label.innerHTML = `<input type="checkbox" value="${c}" class="rounded bg-slate-800 border-slate-700"> ${c}`;
-                container.appendChild(label);
-            });
-        });
     }
 
     function updateControlPanel() {
@@ -358,7 +336,6 @@ document.addEventListener('DOMContentLoaded', () => {
             };
 
             const outliers = detectOutliers(rowsWithRank);
-            renderOutliers(outliers);
 
             const aiPrompts = generateUltimateMarkdown(riskStats, classStats, recStats, outliers, simulatedRaces);
             geminiOutput.value = aiPrompts.gemini;
@@ -2063,31 +2040,6 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('drilldownTableArea').innerHTML = tblHtml;
     }
 
-    function renderOutliers(list) {
-        if (list.length === 0) {
-            outlierResultArea.innerHTML = '<p class="text-slate-500 py-4">現在、条件（EV2.0以上で大敗、またはEV0.5以下で的中）に合致する異常値はありません。</p>';
-            return;
-        }
-        let html = `
-            <table class="analysis-table w-full text-xs">
-                <thead><tr><th>日付</th><th>レース名</th><th>馬名</th><th>EV</th><th>オッズ</th><th>着順</th></tr></thead>
-                <tbody>
-                    ${list.map(r => `
-                        <tr>
-                            <td>${r["日付"]}</td>
-                            <td>${r["レース名"]}</td>
-                            <td class="font-bold text-red-300">${r["馬名"]}</td>
-                            <td>${parseFloat(r["購入時期待値"]).toFixed(2)}</td>
-                            <td>${parseFloat(r["購入時オッズ"]).toFixed(1)}</td>
-                            <td class="font-bold">${r["着順"]}</td>
-                        </tr>
-                    `).join('')}
-                </tbody>
-            </table>
-        `;
-        outlierResultArea.innerHTML = html;
-    }
-
     // --- Charting ---
     function drawEquityCurve(simulatedRaces) {
         // Sort properly by date then race id
@@ -2435,117 +2387,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 }
             }
-        });
-    }
-
-    // --- Simulator (Trio Backtest) ---
-    runSimulatorBtn.addEventListener('click', () => {
-        const r1 = Array.from(document.querySelectorAll('#sim-row1-classes input:checked')).map(i => i.value);
-        const r2 = Array.from(document.querySelectorAll('#sim-row2-classes input:checked')).map(i => i.value);
-        const r3 = Array.from(document.querySelectorAll('#sim-row3-classes input:checked')).map(i => i.value);
-
-        if (r1.length === 0 || r2.length === 0 || r3.length === 0) {
-            alert("1〜3列目の各列に1つ以上のクラスを選択してください。");
-            return;
-        }
-
-        runSimulation(r1, r2, r3);
-    });
-
-    function runSimulation(r1, r2, r3) {
-        const rowsByRace = {};
-        filteredData.forEach(r => { const id = getRaceId(r); if (!rowsByRace[id]) rowsByRace[id] = []; rowsByRace[id].push(r); });
-
-        let totalBets = 0;
-        let totalReturn = 0;
-        let hits = 0;
-        const equity = [];
-        let cumBalance = 0;
-
-        Object.keys(rowsByRace).sort().forEach(id => {
-            const horses = rowsByRace[id];
-            const set1 = horses.filter(h => r1.includes(h["最終確定クラス"] || h["購入時クラス"])).map(h => h["馬番"]);
-            const set2 = horses.filter(h => r2.includes(h["最終確定クラス"] || h["購入時クラス"])).map(h => h["馬番"]);
-            const set3 = horses.filter(h => r3.includes(h["最終確定クラス"] || h["購入時クラス"])).map(h => h["馬番"]);
-
-            // Combinations calculation（Setで重複排除・高速化）
-            const combos = new Set();
-            set1.forEach(h1 => {
-                set2.forEach(h2 => {
-                    if (h2 === h1) return;
-                    set3.forEach(h3 => {
-                        if (h3 === h1 || h3 === h2) return;
-                        // Unique set representing a trio
-                        combos.add([parseInt(h1), parseInt(h2), parseInt(h3)].sort((a,b) => a-b).join('-'));
-                    });
-                });
-            });
-
-            const raceBets = combos.size;
-            totalBets += raceBets;
-            
-            // Check Hit
-            const winners = horses.filter(h => finishOf(h) <= 3).map(h => parseInt(h["馬番"])).sort((a,b) => a-b);
-            let raceReturn = 0;
-            let actualTrioPayout = 0;
-            horses.forEach(h => {
-                const tPay = parseColonPayout(h["三連複払戻"]).pay; // コロン形式 '1-3-5: 5930円' 対応
-                if (tPay > 0) actualTrioPayout = tPay;
-            });
-
-            if (winners.length >= 3) {
-                const winnerCombos = combinationsOf(winners, 3);
-                for (let c of winnerCombos) {
-                    if (combos.has(c.join('-'))) {
-                        hits++;
-                        raceReturn = actualTrioPayout;
-                        totalReturn += raceReturn;
-                        break;
-                    }
-                }
-            }
-            cumBalance += (raceReturn - (raceBets * 100));
-            equity.push(cumBalance);
-        });
-
-        const roi = totalBets > 0 ? (totalReturn / (totalBets * 100)) * 100 : 0;
-        renderSimResults(totalBets, totalReturn, hits, roi, equity);
-    }
-
-    function renderSimResults(bets, returns, hits, roi, equity) {
-        simulatorResultArea.innerHTML = `
-            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
-                <div class="p-4 bg-slate-800 rounded">
-                    <p class="text-xs text-slate-400">仮想投資額</p>
-                    <p class="text-lg font-bold">${(bets * 100).toLocaleString()}円</p>
-                </div>
-                <div class="p-4 bg-slate-800 rounded">
-                    <p class="text-xs text-slate-400">仮想払戻額</p>
-                    <p class="text-lg font-bold text-green-400">${returns.toLocaleString()}円</p>
-                </div>
-                <div class="p-4 bg-slate-800 rounded">
-                    <p class="text-xs text-slate-400">仮想回収率</p>
-                    <p class="text-xl font-bold ${roi >= 100 ? 'text-green-400' : 'text-red-400'}">${roi.toFixed(1)}%</p>
-                </div>
-                <div class="p-4 bg-slate-800 rounded">
-                    <p class="text-xs text-slate-400">的中数</p>
-                    <p class="text-lg font-bold">${hits}件</p>
-                </div>
-            </div>
-        `;
-        simulatorResultArea.classList.remove('hidden');
-        simChartContainer.classList.remove('hidden');
-        drawSimChart(equity);
-    }
-
-    function drawSimChart(data) {
-        if (simChartInstance) simChartInstance.destroy();
-        simChartInstance = new Chart(document.getElementById('simChart').getContext('2d'), {
-            type: 'line',
-            data: { labels: data.map((_,i) => i), datasets: [
-                { label: '仮想累積収支', data: data, borderColor: '#f97316', backgroundColor: 'rgba(249, 115, 22, 0.1)', fill: true, tension: 0.1, pointRadius: 0 }
-            ]},
-            options: { responsive: true, maintainAspectRatio: false, plugins:{legend:{labels:{color:'#fff'}}}, scales:{x:{display:false}, y:{grid:{color:'#334155'}, ticks:{color:'#94a3b8'}}}}
         });
     }
 
