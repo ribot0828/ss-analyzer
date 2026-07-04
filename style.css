@@ -104,10 +104,6 @@ body {
     opacity: 1;
 }
 
-.mao-table {
-    @extend .analysis-table;
-}
-
 .btn-primary {
     background: linear-gradient(90deg, #3b82f6 0%, #8b5cf6 100%);
     transition: transform 0.2s ease, box-shadow 0.2s ease;

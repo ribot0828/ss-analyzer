@@ -43,6 +43,47 @@ document.addEventListener('DOMContentLoaded', () => {
         "最終確定クラス", "着順", "MAO", "実行フラグ", "単勝払戻", "ワイド払戻", "三連複払戻", "三連単払戻"
     ];
 
+    // --- 共通フィールドアクセサ（最終確定値優先・購入時値フォールバック） ---
+    const evOf = r => parseFloat(r["最終確定期待値"]) || parseFloat(r["購入時期待値"]) || 0;
+    const oddsOf = r => parseFloat(r["最終確定オッズ"]) || parseFloat(r["購入時オッズ"]) || 0;
+    const clsOf = r => (r["最終確定クラス"] || r["購入時クラス"] || "").trim();
+    const ratingOf = r => (r["評価"] || "").toUpperCase().trim();
+    const finishOf = r => parseInt(r["着順"]);
+
+    // --- チャート共通テーマ ---
+    const TICK_COLOR = '#94a3b8';
+    const GRID_COLOR = 'rgba(51, 65, 85, 0.5)';
+    const TEXT_COLOR = '#e2e8f0';
+
+    // --- 共通定数: X/D1 オッズ帯別監査分析のオッズ帯 ---
+    const ODDS_BINS = [
+        { label: '10.0未満', min: 0, max: 10.0 },
+        { label: '10.0〜19.9', min: 10.0, max: 20.0 },
+        { label: '20.0〜29.9', min: 20.0, max: 30.0 },
+        { label: '30.0〜39.9', min: 30.0, max: 40.0 },
+        { label: '40.0〜49.9', min: 40.0, max: 50.0 },
+        { label: '50.0以上', min: 50.0, max: 999999 }
+    ];
+
+    // arr から k 個選ぶ全組み合わせ（順序は元の並び順を保持）
+    function combinationsOf(arr, k) {
+        const result = [];
+        const f = (prefix, rest) => {
+            if (prefix.length === k) { result.push(prefix); return; }
+            for (let i = 0; i < rest.length; i++) f([...prefix, rest[i]], rest.slice(i + 1));
+        };
+        f([], arr);
+        return result;
+    }
+
+    // シミュレーション済みレースの時系列ソート（日付 → レースID）
+    const byRaceDateOrder = (a, b) => {
+        const dateA = a.horses[0] ? (a.horses[0]["日付"] || "ZZZZ") : "ZZZZ";
+        const dateB = b.horses[0] ? (b.horses[0]["日付"] || "ZZZZ") : "ZZZZ";
+        if (dateA !== dateB) return dateA.localeCompare(dateB);
+        return a.id.localeCompare(b.id);
+    };
+
     // --- Data Pre-processing ---
     function parseCourseDetail(detail) {
         if (!detail) return { venue: "-", surface: "-", distance: 0, distCat: "other", condition: "-" };
@@ -343,9 +384,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const WIN_CORE_CLASSES = ['A3', 'B2', 'A2', 'B1', 'D1', 'B3', 'X'];
     const PLACE_CORE_CLASSES_FULL = ['S0', 'S1', 'S2', 'A0', 'B0+', 'A1', 'B0'];
     const AXIS_CLASSES = ['S0', 'S1', 'S2', 'A0', 'B0+', 'A1', 'B0'];
-    const WIN_PRIORITY = ['A3', 'B2', 'A2', 'B1', 'D1', 'B3', 'X'];
-    const TRIO_ROW2_DEFENSE = ['S0', 'S1', 'S2', 'A0', 'B0+', 'A1', 'B0'];
-    const TRIO_ROW2_ATTACK = ['A3', 'B2', 'A2', 'B1', 'D1', 'B3', 'X'];
 
     function enrichHorses(horses) {
         let totalScore = 0;
@@ -353,8 +391,8 @@ document.addEventListener('DOMContentLoaded', () => {
         // 1. スコア付与と合計計算
         horses.forEach(h => {
             let score = 0;
-            const r = (h["評価"] || "").toUpperCase().trim();
-            const odds = parseFloat(h["最終確定オッズ"]) || parseFloat(h["購入時オッズ"]) || 0;
+            const r = ratingOf(h);
+            const odds = oddsOf(h);
             if (odds > 0) {
                 if (r === 'S') score = 100;
                 else if (r === 'A') score = 65;
@@ -377,7 +415,7 @@ document.addEventListener('DOMContentLoaded', () => {
             
             let cls = 'N';
             const ev = h.calculatedEv;
-            const r = (h["評価"] || "").toUpperCase().trim();
+            const r = ratingOf(h);
             const winRate = h.expectedWinRate;
 
             if (h.usedOdds > 0) {
@@ -424,18 +462,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function calculateSSDensity(raceHorses) {
         const qualifiedCount = raceHorses.filter(h => {
-            const ev = parseFloat(h["最終確定期待値"]) || parseFloat(h["購入時期待値"]) || 0;
-            const rating = (h["評価"] || "").toUpperCase().trim();
+            const ev = evOf(h);
+            const rating = ratingOf(h);
             return ev >= 1.300 && ['S', 'A', 'B', 'D'].includes(rating);
         }).length;
-        const validCount = raceHorses.filter(h => (parseFloat(h["最終確定オッズ"]) || parseFloat(h["購入時オッズ"]) || 0) > 0).length;
+        const validCount = raceHorses.filter(h => (oddsOf(h)) > 0).length;
         const denominator = Math.max(12, validCount);
         return qualifiedCount / denominator;
     }
 
     function determineRecommendation(raceHorses) {
         const density = calculateSSDensity(raceHorses);
-        const classes = raceHorses.map(h => (h["最終確定クラス"] || h["購入時クラス"] || "").trim());
+        const classes = raceHorses.map(h => clsOf(h));
         const hasS0orS1 = classes.some(c => c === 'S0' || c === 'S1');
         const hasAxis = classes.some(c => AXIS_CLASSES.includes(c));
 
@@ -447,7 +485,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function simulateRace(raceHorses, raceId) {
         raceHorses = enrichHorses(raceHorses);
-        const classes = raceHorses.map(h => (h["最終確定クラス"] || h["購入時クラス"] || "").trim());
+        const classes = raceHorses.map(h => clsOf(h));
         const density = calculateSSDensity(raceHorses);
         
         // 優先順位の定数定義（念のため関数内に明記）
@@ -466,8 +504,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // 【攻撃ソート関数】EV差が0.100以内なら馬番が小さい方（内枠）を優先、それ以外はEV低を優先
         const attackSort = (a, b) => {
-            const evA = parseFloat(a["最終確定期待値"]) || parseFloat(a["購入時期待値"]) || 0;
-            const evB = parseFloat(b["最終確定期待値"]) || parseFloat(b["購入時期待値"]) || 0;
+            const evA = evOf(a);
+            const evB = evOf(b);
             const umA = parseInt(a["馬番"]);
             const umB = parseInt(b["馬番"]);
             
@@ -480,8 +518,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // 【防御ソート関数】スコアや枠順の比較は廃止し、純粋にEVが低い方を優先
         const pureEvSort = (a, b) => {
-            const evA = parseFloat(a["最終確定期待値"]) || parseFloat(a["購入時期待値"]) || 0;
-            const evB = parseFloat(b["最終確定期待値"]) || parseFloat(b["購入時期待値"]) || 0;
+            const evA = evOf(a);
+            const evB = evOf(b);
             return evA - evB;
         };
 
@@ -491,7 +529,7 @@ document.addEventListener('DOMContentLoaded', () => {
         
         let allWinCandidates = [];
         for (let clsName of WIN_PRIORITY_LOCAL) {
-            let cands = raceHorses.filter(h => (h["最終確定クラス"] || h["購入時クラス"] || "").trim() === clsName);
+            let cands = raceHorses.filter(h => clsOf(h) === clsName);
             if (cands.length > 0) {
                 cands.sort(attackSort); // 攻撃ソート適用
                 for (let h of cands) {
@@ -516,13 +554,12 @@ document.addEventListener('DOMContentLoaded', () => {
         let finalTrioCombos = new Set();
         let axisHorse = null;
         let row2 = [];
-        let row3 = [];
         let row3Array = [];
 
         if (!baseSkipTrio) {
             // 軸の選定（優先順位順に探し、同クラスなら防御ソート=純粋EV）
             for (let c of PLACE_CORE_CLASSES) {
-                let cands = raceHorses.filter(h => (h["最終確定クラス"] || h["購入時クラス"] || "").trim() === c);
+                let cands = raceHorses.filter(h => clsOf(h) === c);
                 if (cands.length > 0) {
                     cands.sort(pureEvSort); // 新防御ソート
                     axisHorse = cands[0];
@@ -535,7 +572,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 let defCount = 0;
                 for (let c of TRIO_ROW2_DEFENSE_LOCAL) {
                     if (defCount >= 2) break;
-                    let cands = raceHorses.filter(h => h !== axisHorse && (h["最終確定クラス"] || h["購入時クラス"] || "").trim() === c);
+                    let cands = raceHorses.filter(h => h !== axisHorse && clsOf(h) === c);
                     if (cands.length > 0) {
                         cands.sort(pureEvSort); // 新防御ソート
                         for (let h of cands) {
@@ -552,7 +589,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 let atkCount = 0;
                 for (let c of TRIO_ROW2_ATTACK_LOCAL) {
                     if (atkCount >= 1) break;
-                    let cands = raceHorses.filter(h => h !== axisHorse && (h["最終確定クラス"] || h["購入時クラス"] || "").trim() === c);
+                    let cands = raceHorses.filter(h => h !== axisHorse && clsOf(h) === c);
                     if (cands.length > 0) {
                         cands.sort(attackSort); // 攻撃ソート
                         for (let h of cands) {
@@ -593,9 +630,9 @@ document.addEventListener('DOMContentLoaded', () => {
         let actualTrioPayout = 0;
 
         raceHorses.forEach(h => {
-            if (forceRecalculateWin && parseInt(h["着順"]) === 1) {
+            if (forceRecalculateWin && finishOf(h) === 1) {
                 // 2026-04-05以前は、単勝払戻データを無視してオッズから自己検算
-                const odds = parseFloat(h["最終確定オッズ"]) || parseFloat(h["購入時オッズ"]) || 0;
+                const odds = oddsOf(h);
                 if (odds > 0) {
                     actualWinPayoutMap[h["馬番"]] = Math.round(odds * 10) * 10;
                 }
@@ -606,9 +643,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     actualWinPayoutMap[w.key] = w.pay;        // 勝ち馬の馬番に紐付け
                 } else if (w.pay > 0) {
                     actualWinPayoutMap[h["馬番"]] = w.pay;     // 旧レース値形式
-                } else if (parseInt(h["着順"]) === 1) {
+                } else if (finishOf(h) === 1) {
                     // フォールバック
-                    const odds = parseFloat(h["最終確定オッズ"]) || parseFloat(h["購入時オッズ"]) || 0;
+                    const odds = oddsOf(h);
                     if (odds > 0) actualWinPayoutMap[h["馬番"]] = Math.round(odds * 10) * 10;
                 }
             }
@@ -639,30 +676,30 @@ document.addEventListener('DOMContentLoaded', () => {
         };
 
         finalWinBets.forEach(h => {
-            const cls = (h["最終確定クラス"] || h["購入時クラス"] || "").trim();
+            const cls = clsOf(h);
             const units = getUnits(cls);
             winInvest += units * 100; // 1U = 100円計算
 
-            if (parseInt(h["着順"]) === 1) {
+            if (finishOf(h) === 1) {
                 const umaban = h["馬番"];
                 if (actualWinPayoutMap[umaban]) {
                     winReturn += actualWinPayoutMap[umaban] * units;
                 } else {
-                    winReturn += (parseFloat(h["最終確定オッズ"]) || parseFloat(h["購入時オッズ"]) || 0) * 100 * units;
+                    winReturn += (oddsOf(h)) * 100 * units;
                 }
             }
         });
         amberFailBets.forEach(h => {
-            const cls = (h["最終確定クラス"] || h["購入時クラス"] || "").trim();
+            const cls = clsOf(h);
             const units = getUnits(cls);
             amberFailInvest += units * 100;
 
-            if (parseInt(h["着順"]) === 1) {
+            if (finishOf(h) === 1) {
                 const umaban = h["馬番"];
                 if (actualWinPayoutMap[umaban]) {
                     amberFailReturn += actualWinPayoutMap[umaban] * units;
                 } else {
-                    amberFailReturn += (parseFloat(h["最終確定オッズ"]) || parseFloat(h["購入時オッズ"]) || 0) * 100 * units;
+                    amberFailReturn += (oddsOf(h)) * 100 * units;
                 }
             }
         });
@@ -670,29 +707,20 @@ document.addEventListener('DOMContentLoaded', () => {
         let trioHit = false;
 
         // 三連複の的中判定と払戻集計
-            const winners = raceHorses.filter(h => parseInt(h["着順"]) <= 3).map(h => parseInt(h["馬番"])).sort((a,b) => a-b);
-            if (winners.length >= 3) {
-                const getCombinations = (arr, k) => {
-                    let result = [];
-                    const f = (prefix, arr) => {
-                        if (prefix.length === k) { result.push(prefix); return; }
-                        for (let i = 0; i < arr.length; i++) f([...prefix, arr[i]], arr.slice(i + 1));
-                    };
-                    f([], arr);
-                    return result;
-                };
-                const combos = getCombinations(winners, 3);
-                for (let c of combos) {
-                    if (finalTrioCombos.has(c.join('-'))) {
-                        trioHit = true;
-                        break; // 的中の重複カウント防止：1回のみで確定
-                    }
+        const winners = raceHorses.filter(h => finishOf(h) <= 3).map(h => parseInt(h["馬番"])).sort((a,b) => a-b);
+        if (winners.length >= 3) {
+            const combos = combinationsOf(winners, 3);
+            for (let c of combos) {
+                if (finalTrioCombos.has(c.join('-'))) {
+                    trioHit = true;
+                    break; // 的中の重複カウント防止：1回のみで確定
                 }
-                
-                // ※三連単計算の影響分離: 三連単払戻(h["三連単払戻"])は一切参照・利用せず、
-                // 独立して取得した三連複払戻(actualTrioPayout)のみを加算しています。
-                if (trioHit) trioReturn = actualTrioPayout;
             }
+
+            // ※三連単計算の影響分離: 三連単払戻(h["三連単払戻"])は一切参照・利用せず、
+            // 独立して取得した三連複払戻(actualTrioPayout)のみを加算しています。
+            if (trioHit) trioReturn = actualTrioPayout;
+        }
 
         const refTrioInvest = finalTrioCombos.size * 100;
         const refTrioReturn = trioReturn;
@@ -724,12 +752,7 @@ document.addEventListener('DOMContentLoaded', () => {
         let clvCount = 0;
 
         // Sort properly by date then race id
-        const sortedData = [...simulatedRaces].sort((a,b) => {
-            const dateA = a.horses[0] ? (a.horses[0]["日付"] || "ZZZZ") : "ZZZZ";
-            const dateB = b.horses[0] ? (b.horses[0]["日付"] || "ZZZZ") : "ZZZZ";
-            if (dateA !== dateB) return dateA.localeCompare(dateB);
-            return a.id.localeCompare(b.id);
-        });
+        const sortedData = [...simulatedRaces].sort(byRaceDateOrder);
 
         const winBetRaces = sortedData.filter(r => r.winInvest > 0);
         let winTotalInvest = 0;
@@ -874,10 +897,10 @@ document.addEventListener('DOMContentLoaded', () => {
         return Object.keys(groups).sort().map(cls => {
             const rows = groups[cls];
             const sample = rows.length;
-            const wins = rows.filter(r => parseInt(r["着順"]) === 1).length;
-            const top2 = rows.filter(r => parseInt(r["着順"]) <= 2).length;
-            const top3 = rows.filter(r => parseInt(r["着順"]) <= 3).length;
-            const returns = rows.reduce((acc, r) => acc + (parseInt(r["着順"]) === 1 ? (parseFloat(r["最終確定オッズ"]) * 100) : 0), 0);
+            const wins = rows.filter(r => finishOf(r) === 1).length;
+            const top2 = rows.filter(r => finishOf(r) <= 2).length;
+            const top3 = rows.filter(r => finishOf(r) <= 3).length;
+            const returns = rows.reduce((acc, r) => acc + (finishOf(r) === 1 ? (parseFloat(r["最終確定オッズ"]) * 100) : 0), 0);
 
             const roi = (returns / (sample * 100)) * 100;
             const winRate = (wins / sample) * 100;
@@ -1079,7 +1102,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- 動的EV帯(Bin)生成ヘルパー ---
     function generateDynamicEvBins(rows) {
-        const evValues = rows.map(r => parseFloat(r?.["最終確定期待値"]) || parseFloat(r?.["購入時期待値"]) || 0).filter(v => !isNaN(v));
+        const evValues = rows.map(r => evOf(r)).filter(v => !isNaN(v));
         if (evValues.length === 0) {
             return [{ label: '0.0〜', min: 0.0, max: 999.0 }];
         }
@@ -1200,25 +1223,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // オッズ帯別分析 (X/D1)
             const oddsBinAnalysis = { "D1": [], "X": [] };
-            const bins = [
-                { label: '10.0未満', min: 0, max: 10.0 },
-                { label: '10.0〜19.9', min: 10.0, max: 20.0 },
-                { label: '20.0〜29.9', min: 20.0, max: 30.0 },
-                { label: '30.0〜39.9', min: 30.0, max: 40.0 },
-                { label: '40.0〜49.9', min: 40.0, max: 50.0 },
-                { label: '50.0以上', min: 50.0, max: 999999 }
-            ];
+            const bins = ODDS_BINS;
 
             ['D1', 'X'].forEach(cls => {
-                const clsRows = (rowsWithRank || []).filter(r => (r?.["最終確定クラス"] || r?.["購入時クラス"] || "").trim() === cls);
+                const clsRows = (rowsWithRank || []).filter(r => clsOf(r) === cls);
                 bins.forEach(b => {
                     let okCount = 0, okInvest = 0, okReturn = 0, okHits = 0;
                     let ngCount = 0, ngInvest = 0, ngReturn = 0, ngHits = 0;
 
                     clsRows.forEach(r => {
-                        const odds = parseFloat(r?.["最終確定オッズ"]) || parseFloat(r?.["購入時オッズ"]) || 0;
+                        const odds = oddsOf(r);
                         if (odds >= b.min && odds < b.max) {
-                            const isHit = parseInt(r?.["着順"]) === 1;
+                            const isHit = finishOf(r) === 1;
                             if (r?.auditStatus === 'NG') {
                                 ngCount++;
                                 ngInvest += 100;
@@ -1269,11 +1285,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 clsRows.forEach(r => {
                     const um = parseInt(r?.["馬番"]);
                     if (isNaN(um)) return;
-                    const odds = parseFloat(r?.["最終確定オッズ"]) || parseFloat(r?.["購入時オッズ"]) || 0;
+                    const odds = oddsOf(r);
                     if (!gateStats[um]) gateStats[um] = { count: 0, win: 0, top3: 0, invest: 0, return: 0 };
                     gateStats[um].count++;
                     gateStats[um].invest += 100;
-                    const rank = parseInt(r?.["着順"]);
+                    const rank = finishOf(r);
                     if (rank === 1) {
                         gateStats[um].win++;
                         gateStats[um].return += odds * 100;
@@ -1296,9 +1312,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 const evStats = evBins.map(b => ({ label: b.label, count: 0, win: 0, top3: 0, invest: 0, return: 0 }));
 
                 clsRows.forEach(r => {
-                    const ev = parseFloat(r?.["最終確定期待値"]) || parseFloat(r?.["購入時期待値"]) || 0;
-                    const odds = parseFloat(r?.["最終確定オッズ"]) || parseFloat(r?.["購入時オッズ"]) || 0;
-                    const rank = parseInt(r?.["着順"]);
+                    const ev = evOf(r);
+                    const odds = oddsOf(r);
+                    const rank = finishOf(r);
 
                     const binIdx = evBins.findIndex(b => ev >= b.min && ev < b.max);
                     if (binIdx !== -1) {
@@ -1338,16 +1354,16 @@ document.addEventListener('DOMContentLoaded', () => {
             const evaluationPerformance = [];
             const ranksList = ['S', 'A', 'B', 'C', 'D', 'E', 'F'];
             ranksList.forEach(rank => {
-                const rankRows = (rowsWithRank || []).filter(r => (r?.["評価"] || "").toUpperCase().trim() === rank);
+                const rankRows = (rowsWithRank || []).filter(r => ratingOf(r) === rank);
                 
                 const stats = RANK_EV_BINS.map(b => ({
                     evBin: b.label, count: 0, win: 0, top3: 0, invest: 0, return: 0
                 }));
 
                 rankRows.forEach(r => {
-                    const ev = parseFloat(r?.["最終確定期待値"]) || parseFloat(r?.["購入時期待値"]) || 0;
-                    const odds = parseFloat(r?.["最終確定オッズ"]) || parseFloat(r?.["購入時オッズ"]) || 0;
-                    const pos = parseInt(r?.["着順"]);
+                    const ev = evOf(r);
+                    const odds = oddsOf(r);
+                    const pos = finishOf(r);
 
                     const binIdx = RANK_EV_BINS.findIndex(b => ev >= b.min && ev < b.max);
                     if (binIdx !== -1) {
@@ -1468,19 +1484,12 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderOddsAuditAnalysis(rows) {
         // 対象クラス (X, D1) のみ抽出
         const targetData = rows.filter(r => {
-            const cls = (r["最終確定クラス"] || r["購入時クラス"] || "").trim();
+            const cls = clsOf(r);
             return cls === 'X' || cls === 'D1';
         });
 
-        // オッズ帯の定義
-        const bins = [
-            { label: '10.0未満', min: 0, max: 10.0 },
-            { label: '10.0〜19.9', min: 10.0, max: 20.0 },
-            { label: '20.0〜29.9', min: 20.0, max: 30.0 },
-            { label: '30.0〜39.9', min: 30.0, max: 40.0 },
-            { label: '40.0〜49.9', min: 40.0, max: 50.0 },
-            { label: '50.0以上', min: 50.0, max: 999999 }
-        ];
+        // オッズ帯の定義（共通定数）
+        const bins = ODDS_BINS;
 
         // 各binの集計用構造
         const stats = bins.map(b => ({
@@ -1490,9 +1499,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }));
 
         targetData.forEach(r => {
-            const odds = parseFloat(r["最終確定オッズ"]) || parseFloat(r["購入時オッズ"]) || 0;
+            const odds = oddsOf(r);
             const isNG = r.auditStatus === 'NG';
-            const isHit = parseInt(r["着順"]) === 1;
+            const isHit = finishOf(r) === 1;
 
             const binIdx = bins.findIndex(b => odds >= b.min && odds < b.max);
             if (binIdx === -1) return;
@@ -1559,7 +1568,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     intersect: false
                 },
                 plugins: {
-                    legend: { labels: { color: '#e2e8f0' } },
+                    legend: { labels: { color: TEXT_COLOR } },
                     tooltip: {
                         callbacks: {
                             label: function(context) {
@@ -1585,24 +1594,24 @@ document.addEventListener('DOMContentLoaded', () => {
                 },
                 scales: {
                     x: {
-                        title: { display: true, text: '確定オッズ帯', color: '#94a3b8' },
-                        ticks: { color: '#94a3b8' },
-                        grid: { color: 'rgba(51, 65, 85, 0.5)' }
+                        title: { display: true, text: '確定オッズ帯', color: TICK_COLOR },
+                        ticks: { color: TICK_COLOR },
+                        grid: { color: GRID_COLOR }
                     },
                     y: {
                         type: 'linear',
                         position: 'left',
-                        title: { display: true, text: '単勝回収率 (%)', color: '#94a3b8' },
+                        title: { display: true, text: '単勝回収率 (%)', color: TICK_COLOR },
                         min: 0,
-                        ticks: { color: '#94a3b8' },
-                        grid: { color: 'rgba(51, 65, 85, 0.5)' }
+                        ticks: { color: TICK_COLOR },
+                        grid: { color: GRID_COLOR }
                     },
                     y1: {
                         type: 'linear',
                         position: 'right',
-                        title: { display: true, text: '出走頭数', color: '#94a3b8' },
+                        title: { display: true, text: '出走頭数', color: TICK_COLOR },
                         min: 0,
-                        ticks: { color: '#94a3b8' },
+                        ticks: { color: TICK_COLOR },
                         grid: { drawOnChartArea: false }
                     }
                 }
@@ -1647,7 +1656,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function detectOutliers(data) {
         return data.filter(r => {
             const ev = parseFloat(r["購入時期待値"]) || 0;
-            const rank = parseInt(r["着順"]) || 99;
+            const rank = finishOf(r) || 99;
             return (ev >= 2.0 && rank >= 10) || (ev <= 0.5 && rank === 1);
         });
     }
@@ -1769,7 +1778,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (isNaN(um) || um < 1) return;
             if (!gateStats[um]) gateStats[um] = { count: 0, win: 0, top2: 0, top3: 0 };
             gateStats[um].count++;
-            const rank = parseInt(r["着順"]);
+            const rank = finishOf(r);
             if (rank === 1) gateStats[um].win++;
             if (rank <= 2) gateStats[um].top2++;
             if (rank <= 3) gateStats[um].top3++;
@@ -1799,9 +1808,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const evStats = evBins.map(b => ({ label: b.label, count: 0, win: 0, top3: 0, invest: 0, return: 0 }));
 
         clsData.forEach(r => {
-            const ev = parseFloat(r["最終確定期待値"]) || parseFloat(r["購入時期待値"]) || 0;
-            const odds = parseFloat(r["最終確定オッズ"]) || parseFloat(r["購入時オッズ"]) || 0;
-            const rank = parseInt(r["着順"]);
+            const ev = evOf(r);
+            const odds = oddsOf(r);
+            const rank = finishOf(r);
 
             const binIdx = evBins.findIndex(b => ev >= b.min && ev < b.max);
             if (binIdx !== -1) {
@@ -1891,7 +1900,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 maintainAspectRatio: false,
                 interaction: { mode: 'index', intersect: false },
                 plugins: {
-                    legend: { labels: { color: '#e2e8f0', usePointStyle: true } },
+                    legend: { labels: { color: TEXT_COLOR, usePointStyle: true } },
                     tooltip: {
                         callbacks: {
                             afterBody: (items) => {
@@ -1904,25 +1913,25 @@ document.addEventListener('DOMContentLoaded', () => {
                 },
                 scales: {
                     x: {
-                        title: { display: true, text: '馬番', color: '#94a3b8' },
-                        ticks: { color: '#94a3b8' },
-                        grid: { color: 'rgba(51, 65, 85, 0.5)' }
+                        title: { display: true, text: '馬番', color: TICK_COLOR },
+                        ticks: { color: TICK_COLOR },
+                        grid: { color: GRID_COLOR }
                     },
                     y: {
                         type: 'linear',
                         position: 'left',
-                        title: { display: true, text: '率 (%)', color: '#94a3b8' },
+                        title: { display: true, text: '率 (%)', color: TICK_COLOR },
                         min: 0,
                         max: 100,
-                        ticks: { color: '#94a3b8', callback: v => v + '%' },
-                        grid: { color: 'rgba(51, 65, 85, 0.5)' }
+                        ticks: { color: TICK_COLOR, callback: v => v + '%' },
+                        grid: { color: GRID_COLOR }
                     },
                     y1: {
                         type: 'linear',
                         position: 'right',
-                        title: { display: true, text: '出走回数', color: '#94a3b8' },
+                        title: { display: true, text: '出走回数', color: TICK_COLOR },
                         min: 0,
-                        ticks: { color: '#94a3b8', stepSize: 1 },
+                        ticks: { color: TICK_COLOR, stepSize: 1 },
                         grid: { drawOnChartArea: false }
                     }
                 }
@@ -1992,28 +2001,28 @@ document.addEventListener('DOMContentLoaded', () => {
                 maintainAspectRatio: false,
                 interaction: { mode: 'index', intersect: false },
                 plugins: {
-                    legend: { labels: { color: '#e2e8f0', usePointStyle: true } }
+                    legend: { labels: { color: TEXT_COLOR, usePointStyle: true } }
                 },
                 scales: {
                     x: {
-                        title: { display: true, text: 'EV帯', color: '#94a3b8' },
-                        ticks: { color: '#94a3b8' },
-                        grid: { color: 'rgba(51, 65, 85, 0.5)' }
+                        title: { display: true, text: 'EV帯', color: TICK_COLOR },
+                        ticks: { color: TICK_COLOR },
+                        grid: { color: GRID_COLOR }
                     },
                     y: {
                         type: 'linear',
                         position: 'left',
-                        title: { display: true, text: '回収率 (%)', color: '#94a3b8' },
+                        title: { display: true, text: '回収率 (%)', color: TICK_COLOR },
                         min: 0,
-                        ticks: { color: '#94a3b8', callback: v => v + '%' },
-                        grid: { color: 'rgba(51, 65, 85, 0.5)' }
+                        ticks: { color: TICK_COLOR, callback: v => v + '%' },
+                        grid: { color: GRID_COLOR }
                     },
                     y1: {
                         type: 'linear',
                         position: 'right',
-                        title: { display: true, text: '出走回数', color: '#94a3b8' },
+                        title: { display: true, text: '出走回数', color: TICK_COLOR },
                         min: 0,
-                        ticks: { color: '#94a3b8', stepSize: 1 },
+                        ticks: { color: TICK_COLOR, stepSize: 1 },
                         grid: { drawOnChartArea: false }
                     }
                 }
@@ -2082,12 +2091,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Charting ---
     function drawEquityCurve(simulatedRaces) {
         // Sort properly by date then race id
-        const sorted = [...simulatedRaces].sort((a,b) => {
-            const dateA = a.horses[0] ? (a.horses[0]["日付"] || "ZZZZ") : "ZZZZ";
-            const dateB = b.horses[0] ? (b.horses[0]["日付"] || "ZZZZ") : "ZZZZ";
-            if (dateA !== dateB) return dateA.localeCompare(dateB);
-            return a.id.localeCompare(b.id);
-        });
+        const sorted = [...simulatedRaces].sort(byRaceDateOrder);
         
         const labels = [];
         const actData = [];
@@ -2119,7 +2123,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function filterCalibRows(rows, key) {
         if (key === 'all') return rows || [];
-        const clsOf = r => (r["最終確定クラス"] || r["購入時クラス"] || "").trim();
         if (key === 'wincore') return (rows || []).filter(r => WIN_CORE_CLASSES.includes(clsOf(r)));
         if (key === 'placecore') return (rows || []).filter(r => PLACE_CORE_CLASSES_FULL.includes(clsOf(r)));
         if (key === 'bet') return (rows || []).filter(r => { const c = clsOf(r); return WIN_CORE_CLASSES.includes(c) || PLACE_CORE_CLASSES_FULL.includes(c); });
@@ -2157,14 +2160,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const stats = bins.map(b => ({ min: b.min, max: b.max, n: 0, evSum: 0, returnSum: 0 }));
         (rows || []).forEach(r => {
-            const ev = parseFloat(r["最終確定期待値"]) || parseFloat(r["購入時期待値"]) || 0;
-            const odds = parseFloat(r["最終確定オッズ"]) || parseFloat(r["購入時オッズ"]) || 0;
+            const ev = evOf(r);
+            const odds = oddsOf(r);
             if (ev <= 0 || odds <= 0) return;
             const idx = stats.findIndex(b => ev >= b.min && ev < b.max);
             if (idx === -1) return;
             stats[idx].n++;
             stats[idx].evSum += ev;
-            if (parseInt(r["着順"]) === 1) stats[idx].returnSum += odds; // 1着なら オッズ倍(×100円)を回収
+            if (finishOf(r) === 1) stats[idx].returnSum += odds; // 1着なら オッズ倍(×100円)を回収
         });
 
         // 各ビン: x=平均予測EV, y=実回収率(倍率)= 回収合計 ÷ 投入件数
@@ -2281,7 +2284,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 responsive: true,
                 maintainAspectRatio: false,
                 plugins: {
-                    legend: { labels: { color: '#e2e8f0', usePointStyle: true } },
+                    legend: { labels: { color: TEXT_COLOR, usePointStyle: true } },
                     tooltip: {
                         callbacks: {
                             label: (c) => {
@@ -2295,8 +2298,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 },
                 scales: {
-                    x: { title: { display: true, text: '予測EV（倍率）', color: '#94a3b8' }, ticks: { color: '#94a3b8' }, grid: { color: 'rgba(51,65,85,0.5)' } },
-                    y: { title: { display: true, text: '実回収率（倍率, 1.0=100%）', color: '#94a3b8' }, ticks: { color: '#94a3b8' }, grid: { color: 'rgba(51,65,85,0.5)' } }
+                    x: { title: { display: true, text: '予測EV（倍率）', color: TICK_COLOR }, ticks: { color: TICK_COLOR }, grid: { color: GRID_COLOR } },
+                    y: { title: { display: true, text: '実回収率（倍率, 1.0=100%）', color: TICK_COLOR }, ticks: { color: TICK_COLOR }, grid: { color: GRID_COLOR } }
                 }
             }
         });
@@ -2324,16 +2327,16 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function renderRankEvAnalysis(rank, rows) {
-        const rankRows = rows.filter(r => (r["評価"] || "").toUpperCase().trim() === rank);
+        const rankRows = rows.filter(r => ratingOf(r) === rank);
         
         const stats = RANK_EV_BINS.map(b => ({
             label: b.label, count: 0, win: 0, top3: 0, invest: 0, return: 0
         }));
 
         rankRows.forEach(r => {
-            const ev = parseFloat(r["最終確定期待値"]) || parseFloat(r["購入時期待値"]) || 0;
-            const odds = parseFloat(r["最終確定オッズ"]) || parseFloat(r["購入時オッズ"]) || 0;
-            const pos = parseInt(r["着順"]);
+            const ev = evOf(r);
+            const odds = oddsOf(r);
+            const pos = finishOf(r);
 
             const binIdx = RANK_EV_BINS.findIndex(b => ev >= b.min && ev < b.max);
             if (binIdx !== -1) {
@@ -2406,28 +2409,28 @@ document.addEventListener('DOMContentLoaded', () => {
                 maintainAspectRatio: false,
                 interaction: { mode: 'index', intersect: false },
                 plugins: {
-                    legend: { labels: { color: '#e2e8f0', usePointStyle: true } }
+                    legend: { labels: { color: TEXT_COLOR, usePointStyle: true } }
                 },
                 scales: {
                     x: {
-                        title: { display: true, text: 'EV帯', color: '#94a3b8' },
-                        ticks: { color: '#94a3b8' },
-                        grid: { color: 'rgba(51, 65, 85, 0.5)' }
+                        title: { display: true, text: 'EV帯', color: TICK_COLOR },
+                        ticks: { color: TICK_COLOR },
+                        grid: { color: GRID_COLOR }
                     },
                     y: {
                         type: 'linear',
                         position: 'left',
-                        title: { display: true, text: '率 (%)', color: '#94a3b8' },
+                        title: { display: true, text: '率 (%)', color: TICK_COLOR },
                         min: 0,
-                        ticks: { color: '#94a3b8', callback: v => v + '%' },
-                        grid: { color: 'rgba(51, 65, 85, 0.5)' }
+                        ticks: { color: TICK_COLOR, callback: v => v + '%' },
+                        grid: { color: GRID_COLOR }
                     },
                     y1: {
                         type: 'linear',
                         position: 'right',
-                        title: { display: true, text: 'サンプル数', color: '#94a3b8' },
+                        title: { display: true, text: 'サンプル数', color: TICK_COLOR },
                         min: 0,
-                        ticks: { color: '#94a3b8', stepSize: 1 },
+                        ticks: { color: TICK_COLOR, stepSize: 1 },
                         grid: { drawOnChartArea: false }
                     }
                 }
@@ -2465,25 +2468,24 @@ document.addEventListener('DOMContentLoaded', () => {
             const set2 = horses.filter(h => r2.includes(h["最終確定クラス"] || h["購入時クラス"])).map(h => h["馬番"]);
             const set3 = horses.filter(h => r3.includes(h["最終確定クラス"] || h["購入時クラス"])).map(h => h["馬番"]);
 
-            // Combinations calculation
-            const combos = [];
+            // Combinations calculation（Setで重複排除・高速化）
+            const combos = new Set();
             set1.forEach(h1 => {
                 set2.forEach(h2 => {
                     if (h2 === h1) return;
                     set3.forEach(h3 => {
                         if (h3 === h1 || h3 === h2) return;
                         // Unique set representing a trio
-                        const trio = [parseInt(h1), parseInt(h2), parseInt(h3)].sort((a,b) => a-b).join('-');
-                        if (!combos.includes(trio)) combos.push(trio);
+                        combos.add([parseInt(h1), parseInt(h2), parseInt(h3)].sort((a,b) => a-b).join('-'));
                     });
                 });
             });
 
-            const raceBets = combos.length;
+            const raceBets = combos.size;
             totalBets += raceBets;
             
             // Check Hit
-            const winners = horses.filter(h => parseInt(h["着順"]) <= 3).map(h => parseInt(h["馬番"])).sort((a,b) => a-b);
+            const winners = horses.filter(h => finishOf(h) <= 3).map(h => parseInt(h["馬番"])).sort((a,b) => a-b);
             let raceReturn = 0;
             let actualTrioPayout = 0;
             horses.forEach(h => {
@@ -2492,18 +2494,9 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
             if (winners.length >= 3) {
-                const getCombinations = (arr, k) => {
-                    let result = [];
-                    const f = (prefix, arr) => {
-                        if (prefix.length === k) { result.push(prefix); return; }
-                        for (let i = 0; i < arr.length; i++) f([...prefix, arr[i]], arr.slice(i + 1));
-                    };
-                    f([], arr);
-                    return result;
-                };
-                const winnerCombos = getCombinations(winners, 3);
+                const winnerCombos = combinationsOf(winners, 3);
                 for (let c of winnerCombos) {
-                    if (combos.includes(c.join('-'))) {
+                    if (combos.has(c.join('-'))) {
                         hits++;
                         raceReturn = actualTrioPayout;
                         totalReturn += raceReturn;
