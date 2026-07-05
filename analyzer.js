@@ -325,8 +325,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 console.error("Amber Report rendering error:", e);
             }
 
+            let calibrationStats = [];
             try {
-                const calibrationStats = calculateCalibrationStats(simulatedRaces);
+                calibrationStats = calculateCalibrationStats(simulatedRaces);
                 renderCalibrationReport(calibrationStats);
             } catch (e) {
                 console.error("Calibration Report rendering error:", e);
@@ -354,7 +355,7 @@ document.addEventListener('DOMContentLoaded', () => {
             geminiOutput.value = aiPrompts.gemini;
             claudeOutput.value = aiPrompts.claude;
 
-            window.latestSimData = { rowsWithRank, riskStats, classStats, amberStats, recStats, simulatedRaces };
+            window.latestSimData = { rowsWithRank, riskStats, classStats, amberStats, recStats, simulatedRaces, calibrationStats };
 
             const jsonBtn = document.getElementById('downloadJsonBtn');
             if (jsonBtn) jsonBtn.classList.remove('hidden');
@@ -1333,7 +1334,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         
         try {
-            const { rowsWithRank, classStats, riskStats, amberStats, recStats, simulatedRaces } = window.latestSimData;
+            const { rowsWithRank, classStats, riskStats, amberStats, recStats, simulatedRaces, calibrationStats } = window.latestSimData;
             const totalRaces = parseInt(document.getElementById('stat-race-count')?.textContent || '0') || 0;
             const overallRoi = parseFloat(document.getElementById('stat-overall-roi')?.textContent || '0') || 0;
 
@@ -1615,7 +1616,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 evCalibration: window.latestCalibration ? {
                     winCore: window.latestCalibration.winCore || null,
                     all: window.latestCalibration.all || null
-                } : null
+                } : null,
+                // 評価ランク別キャリブレーション検証: 勝率モデル（score/totalScore）の予測勝率と実勝率の乖離
+                rankCalibration: (calibrationStats || []).map(s => ({
+                    rank: s.rank,
+                    samples: s.n,
+                    predictedWinRate: (s.predictedWinRate || 0) * 100,
+                    actualWinRate: (s.actualWinRate || 0) * 100,
+                    actualWinRateCI95: s.actualWinRateCI95 ? { lo: s.actualWinRateCI95.lo * 100, hi: s.actualWinRateCI95.hi * 100 } : null,
+                    ratio: s.ratio,
+                    marketSupportRate: s.marketSupportRate !== null && s.marketSupportRate !== undefined ? s.marketSupportRate * 100 : null
+                }))
             };
 
             // --- 出力最適化: サンプル0の項目を除去 / 数値を丸め / 改行・空白を排してファイルを軽量化 ---
