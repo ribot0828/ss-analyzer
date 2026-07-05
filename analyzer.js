@@ -402,7 +402,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (['S0','S1','S2','A0','B0+','A1','B0'].includes(cls)) mao = 0.60 / winRate; // Ver.5.3: 防御系係数 0.50→0.60
             else if (['B1', 'B2', 'B3', 'A2', 'A3'].includes(cls)) mao = 0.90 / winRate;
             else if (cls === 'X') mao = 3.00 / winRate;
-            else if (cls === 'D1') mao = 1.00 / winRate;
+            else if (cls === 'D1') mao = 1.50 / winRate; // 2026-07-05: D1係数 1.00→1.50（rankCalibration D比0.666による較正）
         }
 
         let amberPass = false;
@@ -2705,7 +2705,7 @@ document.addEventListener('DOMContentLoaded', () => {
   - X: D かつ 3.000〜3.999 ／ D1: D かつ 1.300〜1.799
   - 上記いずれにも該当しなければ N（買い目対象外）
 - 系統: Place-Core/軸・防御 = {S0,S1,S2,A0,B0+,A1,B0}／ Win-Core/攻撃 = {A3,B2,A2,B1,D1,B3,X}
-- MAO（最低必要オッズ）: 防御系=0.60÷勝率, 攻撃系(B1,B2,B3,A2,A3)=0.90÷勝率, X=3.00÷勝率, D1=1.00÷勝率
+- MAO（最低必要オッズ）: 防御系=0.60÷勝率, 攻撃系(B1,B2,B3,A2,A3)=0.90÷勝率, X=3.00÷勝率, D1=1.50÷勝率
 - 琥珀監査(Amber)通過条件: X・D1 → オッズ≧MAO ／ その他 → オッズ≧MAO×1.2
 - SS密度 = (EV≧1.300 かつ 評価∈{S,A,B,D} の頭数) ÷ max(12, 出走頭数)
 - 推奨度: 密度≧0.250 かつ S0/S1あり→SSS ／ 密度≧0.250 かつ 軸あり→SS ／ 密度≧0.150→S ／ それ未満→Low
