@@ -233,6 +233,16 @@
                     <div id="amberReportArea"></div>
                 </section>
 
+                <!-- Calibration Validation Report -->
+                <section class="glass-panel animate-fade">
+                    <h3 class="text-lg font-semibold mb-6">📐 評価ランク別キャリブレーション検証</h3>
+                    <p class="text-xs text-slate-400 mb-4">勝率モデル（score/totalScore）の予測勝率が実勝率とどれだけ較正されているかを評価ランク別に検証します。乖離(実/予測)が0.8未満または1.25超の行は警告表示です。</p>
+                    <div class="chart-container mb-6" style="height: 320px; width: 100%;">
+                        <canvas id="calibrationChart"></canvas>
+                    </div>
+                    <div id="calibrationReportArea"></div>
+                </section>
+
                 <!-- Advanced Risk Analysis -->
                 <section class="glass-panel animate-fade">
                     <h3 class="text-lg font-semibold mb-6">📉 アドバンスド・リスク評価 (単勝専用)</h3>

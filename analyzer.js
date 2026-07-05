@@ -30,6 +30,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let allData = new Map(); 
     let filteredData = [];
     let equityChartInstance = null;
+    let calibrationChartInstance = null;
 
     const EXPECTED_HEADERS = [
         "日付", "開催場所", "レース名", "コース詳細", "グレード・頭数", "馬番", "馬名", "購入時人気", "購入時オッズ",
@@ -322,6 +323,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 renderAmberReport(amberStats);
             } catch (e) {
                 console.error("Amber Report rendering error:", e);
+            }
+
+            try {
+                const calibrationStats = calculateCalibrationStats(simulatedRaces);
+                renderCalibrationReport(calibrationStats);
+            } catch (e) {
+                console.error("Calibration Report rendering error:", e);
             }
 
             renderRiskAnalysisDetails(riskStats);
@@ -1009,6 +1017,42 @@ document.addEventListener('DOMContentLoaded', () => {
         ];
     }
 
+    // 評価ランク別キャリブレーション検証: 勝率モデル（score/totalScore）の予測勝率と実勝率を比較
+    function calculateCalibrationStats(simulatedRaces) {
+        const ranksList = ['S', 'A', 'B', 'C', 'D', 'E', 'F'];
+        const groups = {};
+        ranksList.forEach(rank => { groups[rank] = []; });
+
+        (simulatedRaces || []).forEach(race => {
+            (race.horses || []).forEach(h => {
+                const rank = ratingOf(h);
+                if (!groups[rank]) return; // 想定外の評価値は除外
+                if (isNaN(finishOf(h))) return; // 着順が無効な行は除外
+                if (!(buyOddsOf(h) > 0)) return; // 購入時オッズが無い行は除外
+                groups[rank].push(h);
+            });
+        });
+
+        return ranksList.map(rank => {
+            const rows = groups[rank];
+            const n = rows.length;
+            if (n === 0) {
+                return { rank, n: 0, predictedWinRate: 0, actualWinRate: 0, actualWinRateCI95: null, ratio: null, marketSupportRate: null };
+            }
+
+            const wins = rows.filter(h => finishOf(h) === 1).length;
+            const predictedWinRate = rows.reduce((acc, h) => acc + (h.expectedWinRate || 0), 0) / n;
+            const actualWinRate = wins / n;
+            const actualWinRateCI95 = wilsonCI(wins, n);
+            const ratio = predictedWinRate > 0 ? actualWinRate / predictedWinRate : null;
+
+            // おまけ: 市場基準（単勝支持率 ≒ 1/オッズ の平均）
+            const marketSupportRate = rows.reduce((acc, h) => acc + (1 / buyOddsOf(h)), 0) / n;
+
+            return { rank, n, predictedWinRate, actualWinRate, actualWinRateCI95, ratio, marketSupportRate };
+        });
+    }
+
     function renderAmberReport(stats) {
         let html = `
             <div class="overflow-x-auto">
@@ -1038,6 +1082,88 @@ document.addEventListener('DOMContentLoaded', () => {
         `;
         const el = document.getElementById('amberReportArea');
         if(el) el.innerHTML = html;
+    }
+
+    function renderCalibrationReport(stats) {
+        const rows = (stats || []).filter(s => s.n > 0);
+
+        let html = `
+            <div class="overflow-x-auto">
+                <table class="analysis-table w-full text-sm">
+                    <thead>
+                        <tr>
+                            <th>評価</th>
+                            <th>頭数</th>
+                            <th>予測勝率</th>
+                            <th>実勝率</th>
+                            <th>実勝率95%CI</th>
+                            <th>乖離(実/予測)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows.map(s => {
+                            const warn = s.ratio !== null && (s.ratio < 0.8 || s.ratio > 1.25);
+                            const ciStr = s.actualWinRateCI95 ? `${(s.actualWinRateCI95.lo * 100).toFixed(1)}% - ${(s.actualWinRateCI95.hi * 100).toFixed(1)}%` : '-';
+                            const ratioStr = s.ratio !== null ? s.ratio.toFixed(2) : '-';
+                            return `
+                            <tr class="${warn ? 'text-red-400 font-bold' : ''}">
+                                <td class="font-bold">${s.rank}</td>
+                                <td>${s.n}</td>
+                                <td>${(s.predictedWinRate * 100).toFixed(1)}%</td>
+                                <td>${(s.actualWinRate * 100).toFixed(1)}%</td>
+                                <td>${ciStr}</td>
+                                <td>${ratioStr}${warn ? ' ⚠️' : ''}</td>
+                            </tr>`;
+                        }).join('')}
+                    </tbody>
+                </table>
+            </div>
+        `;
+        const el = document.getElementById('calibrationReportArea');
+        if (el) el.innerHTML = html;
+
+        // 予測勝率 vs 実勝率のランク別棒グラフ
+        const chartEl = document.getElementById('calibrationChart');
+        if (chartEl) {
+            if (calibrationChartInstance) calibrationChartInstance.destroy();
+            const labels = rows.map(s => s.rank);
+            const predicted = rows.map(s => s.predictedWinRate * 100);
+            const actual = rows.map(s => s.actualWinRate * 100);
+
+            calibrationChartInstance = new Chart(chartEl.getContext('2d'), {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: '予測勝率 (%)',
+                            data: predicted,
+                            backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                            borderColor: '#3b82f6',
+                            borderWidth: 1
+                        },
+                        {
+                            label: '実勝率 (%)',
+                            data: actual,
+                            backgroundColor: 'rgba(245, 158, 11, 0.5)',
+                            borderColor: '#f59e0b',
+                            borderWidth: 1
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { labels: { color: TEXT_COLOR, usePointStyle: true } }
+                    },
+                    scales: {
+                        x: { ticks: { color: TICK_COLOR }, grid: { color: GRID_COLOR } },
+                        y: { ticks: { color: TICK_COLOR }, grid: { color: GRID_COLOR }, beginAtZero: true }
+                    }
+                }
+            });
+        }
     }
 
     function calculateRecommendationStats(simulatedRaces) {
