@@ -37,10 +37,15 @@ document.addEventListener('DOMContentLoaded', () => {
         "最終確定クラス", "着順", "MAO", "実行フラグ", "単勝払戻", "ワイド払戻", "三連複払戻", "三連単払戻"
     ];
 
-    // --- 共通フィールドアクセサ（最終確定値優先・購入時値フォールバック） ---
-    const evOf = r => parseFloat(r["最終確定期待値"]) || parseFloat(r["購入時期待値"]) || 0;
+    // --- 共通フィールドアクセサ ---
+    // 判定（クラス分類・EV・勝率・MAO・Amber・SS密度・推奨度・オッズ帯ビニング）は購入時オッズ基準で行う。
+    // evOf/clsOf は購入時値優先（欠損時のみ最終確定値にフォールバック）。
+    const evOf = r => parseFloat(r["購入時期待値"]) || parseFloat(r["最終確定期待値"]) || 0;
+    const clsOf = r => (r["購入時クラス"] || r["最終確定クラス"] || "").trim();
+    // oddsOf は払戻（回収金額の計算とそのフォールバック）専用。確定オッズ優先・購入時値フォールバック。
     const oddsOf = r => parseFloat(r["最終確定オッズ"]) || parseFloat(r["購入時オッズ"]) || 0;
-    const clsOf = r => (r["最終確定クラス"] || r["購入時クラス"] || "").trim();
+    // buyOddsOf は判定用。購入時オッズ優先（欠損しているレガシーデータのみ確定値にフォールバック）。
+    const buyOddsOf = r => parseFloat(r["購入時オッズ"]) || parseFloat(r["最終確定オッズ"]) || 0;
     const ratingOf = r => (r["評価"] || "").toUpperCase().trim();
     const finishOf = r => parseInt(r["着順"]);
 
@@ -362,14 +367,53 @@ document.addEventListener('DOMContentLoaded', () => {
     const PLACE_CORE_CLASSES_FULL = ['S0', 'S1', 'S2', 'A0', 'B0+', 'A1', 'B0'];
     const AXIS_CLASSES = ['S0', 'S1', 'S2', 'A0', 'B0+', 'A1', 'B0'];
 
+    // クラス分類・MAO・Amber判定ロジックを共通化（購入時/確定オッズどちらの評価にも使い回す）
+    function classifyHorse(rating, odds, winRate, ev) {
+        let cls = 'N';
+
+        if (odds > 0) {
+            if (rating === 'S' && ev < 0.700) cls = 'S0';
+            else if (rating === 'S' && ev >= 0.700 && ev <= 0.999) cls = 'S1';
+            else if (rating === 'S' && ev >= 1.200 && ev <= 1.499) cls = 'S2';
+            else if (rating === 'B' && ev <= 0.500) cls = 'B0+';
+            else if (rating === 'A' && ev < 0.600) cls = 'A0';
+            else if (rating === 'B' && ev > 0.500 && ev <= 0.900) cls = 'B0';
+            else if (rating === 'A' && ev >= 0.600 && ev <= 0.899) cls = 'A1';
+            else if (rating === 'D' && ev >= 3.000 && ev <= 3.999) cls = 'X';
+            else if (rating === 'B' && ev >= 1.500 && ev <= 1.699) cls = 'B2';
+            else if (rating === 'B' && ev >= 1.100 && ev <= 1.350) cls = 'B1';
+            else if (rating === 'B' && ev >= 2.000 && ev <= 4.500) cls = 'B3';
+            else if (rating === 'A' && ev >= 1.000 && ev <= 1.250) cls = 'A2';
+            else if (rating === 'A' && ev >= 1.500 && ev <= 1.699) cls = 'A3';
+            else if (rating === 'D' && ev >= 1.300 && ev <= 1.799) cls = 'D1';
+        }
+
+        let mao = 999;
+        if (winRate > 0) {
+            if (['S0','S1','S2','A0','B0+','A1','B0'].includes(cls)) mao = 0.60 / winRate; // Ver.5.3: 防御系係数 0.50→0.60
+            else if (['B1', 'B2', 'B3', 'A2', 'A3'].includes(cls)) mao = 0.90 / winRate;
+            else if (cls === 'X') mao = 3.00 / winRate;
+            else if (cls === 'D1') mao = 1.00 / winRate;
+        }
+
+        let amberPass = false;
+        if (cls === 'X' || cls === 'D1') {
+            amberPass = odds >= mao;
+        } else if (['S0','S1','S2','A0','B0+','A1','B0','B1','B2','B3','A2', 'A3'].includes(cls)) {
+            amberPass = odds >= (mao * 1.2);
+        }
+
+        return { cls, mao, amberPass };
+    }
+
     function enrichHorses(horses) {
         let totalScore = 0;
-        
-        // 1. スコア付与と合計計算
+
+        // 1. スコア付与と合計計算（判定は購入時オッズ基準）
         horses.forEach(h => {
             let score = 0;
             const r = ratingOf(h);
-            const odds = oddsOf(h);
+            const odds = buyOddsOf(h);
             if (odds > 0) {
                 if (r === 'S') score = 100;
                 else if (r === 'A') score = 65;
@@ -384,54 +428,29 @@ document.addEventListener('DOMContentLoaded', () => {
             totalScore += score;
         });
 
-        // 2. 完全再計算とプロパティ上書き
+        // 2. 完全再計算とプロパティ上書き（判定＝購入時オッズが正）
         horses.forEach(h => {
             h.expectedWinRate = (totalScore > 0 && h.usedOdds > 0) ? h.score / totalScore : 0;
             const rawEv = h.expectedWinRate * h.usedOdds;
             h.calculatedEv = Math.floor(rawEv * 1000 + 1e-9) / 1000;
-            
-            let cls = 'N';
-            const ev = h.calculatedEv;
+
             const r = ratingOf(h);
             const winRate = h.expectedWinRate;
+            const { cls, amberPass } = classifyHorse(r, h.usedOdds, winRate, h.calculatedEv);
 
-            if (h.usedOdds > 0) {
-                if (r === 'S' && ev < 0.700) cls = 'S0';
-                else if (r === 'S' && ev >= 0.700 && ev <= 0.999) cls = 'S1';
-                else if (r === 'S' && ev >= 1.200 && ev <= 1.499) cls = 'S2';
-                else if (r === 'B' && ev <= 0.500) cls = 'B0+';
-                else if (r === 'A' && ev < 0.600) cls = 'A0';
-                else if (r === 'B' && ev > 0.500 && ev <= 0.900) cls = 'B0';
-                else if (r === 'A' && ev >= 0.600 && ev <= 0.899) cls = 'A1';
-                else if (r === 'D' && ev >= 3.000 && ev <= 3.999) cls = 'X';
-                else if (r === 'B' && ev >= 1.500 && ev <= 1.699) cls = 'B2';
-                else if (r === 'B' && ev >= 1.100 && ev <= 1.350) cls = 'B1';
-                else if (r === 'B' && ev >= 2.000 && ev <= 4.500) cls = 'B3';
-                else if (r === 'A' && ev >= 1.000 && ev <= 1.250) cls = 'A2';
-                else if (r === 'A' && ev >= 1.500 && ev <= 1.699) cls = 'A3';
-                else if (r === 'D' && ev >= 1.300 && ev <= 1.799) cls = 'D1';
-            }
-
-            let mao = 999;
-            if (winRate > 0) {
-                if (['S0','S1','S2','A0','B0+','A1','B0'].includes(cls)) mao = 0.60 / winRate; // Ver.5.3: 防御系係数 0.50→0.60
-                else if (['B1', 'B2', 'B3', 'A2', 'A3'].includes(cls)) mao = 0.90 / winRate;
-                else if (cls === 'X') mao = 3.00 / winRate;
-                else if (cls === 'D1') mao = 1.00 / winRate;
-            }
-
-            let amberPass = false;
-            if (cls === 'X' || cls === 'D1') {
-                amberPass = h.usedOdds >= mao;
-            } else if (['S0','S1','S2','A0','B0+','A1','B0','B1','B2','B3','A2', 'A3'].includes(cls)) {
-                amberPass = h.usedOdds >= (mao * 1.2);
-            }
             h.amberPass = amberPass;
-            // 後続のシミュレーションがそのまま動くようにCSVの値を強制上書き
-            h["最終確定クラス"] = cls;
+            // simulateRace 等が参照する購入時ベースの判定値（正）
             h["購入時クラス"] = cls;
-            h["最終確定期待値"] = h.calculatedEv;
             h["購入時期待値"] = h.calculatedEv;
+
+            // 確定オッズでの参照値（表示・参考用。購入時値が欠損した場合のみ購入時値を流用）
+            const finalOdds = parseFloat(h["最終確定オッズ"]) || h.usedOdds;
+            const finalWinRate = (totalScore > 0 && finalOdds > 0) ? h.score / totalScore : 0;
+            const finalRawEv = finalWinRate * finalOdds;
+            const finalEv = Math.floor(finalRawEv * 1000 + 1e-9) / 1000;
+            const finalResult = classifyHorse(r, finalOdds, finalWinRate, finalEv);
+            h["最終確定クラス"] = finalResult.cls;
+            h["最終確定期待値"] = finalEv;
         });
 
         return horses;
@@ -443,7 +462,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const rating = ratingOf(h);
             return ev >= 1.300 && ['S', 'A', 'B', 'D'].includes(rating);
         }).length;
-        const validCount = raceHorses.filter(h => (oddsOf(h)) > 0).length;
+        const validCount = raceHorses.filter(h => (buyOddsOf(h)) > 0).length;
         const denominator = Math.max(12, validCount);
         return qualifiedCount / denominator;
     }
@@ -920,7 +939,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function calculateClassStats(data) {
         const groups = {};
         data.forEach(r => {
-            let cls = r["最終確定クラス"] || r["購入時クラス"] || "不明";
+            let cls = r["購入時クラス"] || r["最終確定クラス"] || "不明";
             // X/D1で監査NGの場合、集計キーを分離
             if ((cls === 'X' || cls === 'D1') && r.auditStatus === 'NG') {
                 cls = cls + '(NG)';
@@ -947,7 +966,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 top2, top2Rate: (top2 / sample) * 100,
                 top3, top3Rate: (top3 / sample) * 100,
                 roi,
-                avgEv: rows.reduce((acc, r) => acc + (parseFloat(r["最終確定期待値"]) || 0), 0) / sample
+                avgEv: rows.reduce((acc, r) => acc + evOf(r), 0) / sample
             };
         });
     }
@@ -1272,17 +1291,18 @@ document.addEventListener('DOMContentLoaded', () => {
                     let ngCount = 0, ngInvest = 0, ngReturn = 0, ngHits = 0;
 
                     clsRows.forEach(r => {
-                        const odds = oddsOf(r);
-                        if (odds >= b.min && odds < b.max) {
+                        const buyOdds = buyOddsOf(r); // オッズ帯ビニングは購入時オッズで判定
+                        const payoutOdds = oddsOf(r); // 払戻計算は確定オッズ
+                        if (buyOdds >= b.min && buyOdds < b.max) {
                             const isHit = finishOf(r) === 1;
                             if (r?.auditStatus === 'NG') {
                                 ngCount++;
                                 ngInvest += 100;
-                                if (isHit) { ngReturn += odds * 100; ngHits++; }
+                                if (isHit) { ngReturn += payoutOdds * 100; ngHits++; }
                             } else {
                                 okCount++;
                                 okInvest += 100;
-                                if (isHit) { okReturn += odds * 100; okHits++; }
+                                if (isHit) { okReturn += payoutOdds * 100; okHits++; }
                             }
                         }
                     });
@@ -1309,7 +1329,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const baseCls = isNGClass ? c.cls.replace('(NG)', '') : (c?.cls || '');
                 
                 const clsRows = (rowsWithRank || []).filter(r => {
-                    const rCls = r?.["最終確定クラス"] || r?.["購入時クラス"] || "";
+                    const rCls = r?.["購入時クラス"] || r?.["最終確定クラス"] || "";
                     if (isNGClass) {
                         return rCls === baseCls && r?.auditStatus === 'NG';
                     } else {
@@ -1542,21 +1562,22 @@ document.addEventListener('DOMContentLoaded', () => {
         }));
 
         targetData.forEach(r => {
-            const odds = oddsOf(r);
+            const buyOdds = buyOddsOf(r); // オッズ帯ビニングは購入時オッズで判定
+            const payoutOdds = oddsOf(r); // 払戻計算は確定オッズ
             const isNG = r.auditStatus === 'NG';
             const isHit = finishOf(r) === 1;
 
-            const binIdx = bins.findIndex(b => odds >= b.min && odds < b.max);
+            const binIdx = bins.findIndex(b => buyOdds >= b.min && buyOdds < b.max);
             if (binIdx === -1) return;
 
             if (isNG) {
                 stats[binIdx].ngCount++;
                 stats[binIdx].ngInvest += 100;
-                if (isHit) stats[binIdx].ngReturn += odds * 100;
+                if (isHit) stats[binIdx].ngReturn += payoutOdds * 100;
             } else {
                 stats[binIdx].okCount++;
                 stats[binIdx].okInvest += 100;
-                if (isHit) stats[binIdx].okReturn += odds * 100;
+                if (isHit) stats[binIdx].okReturn += payoutOdds * 100;
             }
         });
 
@@ -1807,7 +1828,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const baseCls = isNGClass ? cls.replace('(NG)', '') : cls;
 
         const clsData = filteredData.filter(r => {
-            const rCls = r["最終確定クラス"] || r["購入時クラス"] || "";
+            const rCls = r["購入時クラス"] || r["最終確定クラス"] || "";
             if (isNGClass) {
                 return rCls === baseCls && r.auditStatus === 'NG';
             } else {
