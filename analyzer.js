@@ -724,6 +724,16 @@ document.addEventListener('DOMContentLoaded', () => {
         };
     }
 
+    function wilsonCI(k, n) {
+        if (!n || n === 0) return null;
+        const z = 1.96;
+        const p = k / n;
+        const denom = 1 + (z * z) / n;
+        const center = (p + (z * z) / (2 * n)) / denom;
+        const half = (z * Math.sqrt((p * (1 - p)) / n + (z * z) / (4 * n * n))) / denom;
+        return { lo: Math.max(0, center - half), hi: Math.min(1, center + half) };
+    }
+
     function calculateRiskMetrics(simulatedRaces) {
         let clvTotal = 0;
         let clvCount = 0;
@@ -841,6 +851,52 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         });
 
+        // 単勝回収率のブートストラップ95%信頼区間（B=2000回, 復元抽出）
+        let winRoiBootstrapCI95 = null;
+        if (winBetRaces.length >= 10) {
+            const n = winBetRaces.length;
+            const B = 2000;
+            const rois = [];
+            for (let b = 0; b < B; b++) {
+                let sumInvest = 0;
+                let sumReturn = 0;
+                for (let j = 0; j < n; j++) {
+                    const idx = Math.floor(Math.random() * n);
+                    const r = winBetRaces[idx];
+                    sumInvest += r.winInvest;
+                    sumReturn += r.winReturn;
+                }
+                rois.push(sumInvest > 0 ? (sumReturn / sumInvest) * 100 : 0);
+            }
+            rois.sort((a, b) => a - b);
+            const loIdx = Math.floor(0.025 * B);
+            const hiIdx = Math.min(B - 1, Math.floor(0.975 * B));
+            winRoiBootstrapCI95 = { lo: rois[loIdx], hi: rois[hiIdx] };
+        }
+
+        // 時系列 前半/後半 安定性分割（日付順ソート済みの winBetRaces を使用）
+        const halfSize = Math.ceil(winBetRaces.length / 2);
+        const firstHalfRaces = winBetRaces.slice(0, halfSize);
+        const secondHalfRaces = winBetRaces.slice(halfSize);
+        const summarizeHalf = (races) => {
+            if (races.length === 0) return null;
+            let inv = 0, ret = 0, hits = 0;
+            races.forEach(r => {
+                inv += r.winInvest;
+                ret += r.winReturn;
+                if (r.winReturn > 0) hits++;
+            });
+            return {
+                n: races.length,
+                roi: inv > 0 ? (ret / inv) * 100 : 0,
+                hitRate: (hits / races.length) * 100
+            };
+        };
+        const timeSplitStability = {
+            firstHalf: summarizeHalf(firstHalfRaces),
+            secondHalf: summarizeHalf(secondHalfRaces)
+        };
+
         return {
             raceCount: simulatedRaces.length,
             horseCount: simulatedRaces.reduce((acc, r) => acc + r.horses.length, 0),
@@ -855,7 +911,9 @@ document.addEventListener('DOMContentLoaded', () => {
             sharpeRatio: sharpe,
             maxWinLosingStreak: maxLosingStreak,
             losingStreakDistribution: dist,
-            monteCarloMddProbabilities: mcProbs
+            monteCarloMddProbabilities: mcProbs,
+            winRoiBootstrapCI95: winRoiBootstrapCI95,
+            timeSplitStability: timeSplitStability
         };
     }
 
@@ -885,6 +943,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return {
                 cls, sample, wins,
                 winRate,
+                winRateCI95: wilsonCI(wins, sample),
                 top2, top2Rate: (top2 / sample) * 100,
                 top3, top3Rate: (top3 / sample) * 100,
                 roi,
@@ -967,7 +1026,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return order.map(rec => {
             const races = simulatedRaces.filter(r => r.rec === rec);
             const raceCount = races.length;
-            if (raceCount === 0) return { rec, raceCount: 0, winInvest: 0, winROI: 0, winHits: 0, winBetRaces: 0, trioInvest: 0, trioROI: 0, trioHits: 0, trioBetRaces: 0, totalInvest: 0, totalROI: 0, refTrioInvest: 0, refTrioROI: 0, refTrioHits: 0, refTrioBetRaces: 0 };
+            if (raceCount === 0) return { rec, raceCount: 0, winInvest: 0, winROI: 0, winHits: 0, winBetRaces: 0, winRateCI95: null, trioInvest: 0, trioROI: 0, trioHits: 0, trioBetRaces: 0, totalInvest: 0, totalROI: 0, refTrioInvest: 0, refTrioROI: 0, refTrioHits: 0, refTrioBetRaces: 0 };
 
             let winInvest = 0;
             let winReturn = 0;
@@ -1009,7 +1068,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const totalROI = totalInvest > 0 ? ((winReturn + trioReturn) / totalInvest) * 100 : 0;
             const refTrioROI = refTrioInvest > 0 ? (refTrioReturn / refTrioInvest) * 100 : 0;
 
-            return { rec, raceCount, winInvest, winROI, winHits, winBetRaces, trioInvest, trioROI, trioHits, trioBetRaces, totalInvest, totalROI, refTrioInvest, refTrioROI, refTrioHits, refTrioBetRaces };
+            return { rec, raceCount, winInvest, winROI, winHits, winBetRaces, winRateCI95: wilsonCI(winHits, winBetRaces), trioInvest, trioROI, trioHits, trioBetRaces, totalInvest, totalROI, refTrioInvest, refTrioROI, refTrioHits, refTrioBetRaces };
         }).filter(s => s.raceCount > 0);
     }
 
@@ -1150,6 +1209,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             wideRecoveryRate: 0.0,
                             trifectaRecoveryRate: rs?.trioROI || 0.0,
                             winHitRate: rs?.winBetRaces > 0 ? (rs.winHits / rs.winBetRaces) * 100 : 0.0,
+                            winRateCI95: rs?.winRateCI95 ? { lo: rs.winRateCI95.lo * 100, hi: rs.winRateCI95.hi * 100 } : null,
                             wideHitRate: 0.0,
                             trifectaHitRate: rs?.trioBetRaces > 0 ? (rs.trioHits / rs.trioBetRaces) * 100 : 0.0,
                             refTrifectaRecoveryRate: rs?.refTrioROI || 0.0,
@@ -1319,6 +1379,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     cls: c?.cls || "",
                     sampleSize: c?.sample || 0,
                     winRate: c?.winRate || 0.0,
+                    winRateCI95: c?.winRateCI95 ? { lo: c.winRateCI95.lo * 100, hi: c.winRateCI95.hi * 100 } : null,
                     rentaiRate: c?.top2Rate || 0.0,
                     placeRate: c?.top3Rate || 0.0,
                     winRecoveryRate: c?.roi || 0.0,
@@ -1379,7 +1440,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     sharpeRatio: riskStats?.sharpeRatio || 0,
                     maxWinLosingStreak: riskStats?.maxWinLosingStreak || 0,
                     losingStreakDistribution: riskStats?.losingStreakDistribution || {},
-                    monteCarloMddProbabilities: riskStats?.monteCarloMddProbabilities || {}
+                    monteCarloMddProbabilities: riskStats?.monteCarloMddProbabilities || {},
+                    winRoiBootstrapCI95: riskStats?.winRoiBootstrapCI95 || null,
+                    timeSplitStability: riskStats?.timeSplitStability || null
                 },
                 evaluationPerformance: evaluationPerformance,
                 recommendationPerformance: recommendationPerformance,
@@ -2404,16 +2467,24 @@ document.addEventListener('DOMContentLoaded', () => {
         md += `- 平均CLV: **${risk.avgClv.toFixed(3)}**
 `;
         md += `- 対象レース数: ${risk.raceCount} / 馬頭数: ${risk.horseCount}
+`;
+        const bootCI = risk.winRoiBootstrapCI95;
+        md += `- 単勝回収率 95%CI（ブートストラップ）: ${bootCI ? `${bootCI.lo.toFixed(1)}%〜${bootCI.hi.toFixed(1)}%` : 'サンプル不足(n<10)'}
+`;
+        const tss = risk.timeSplitStability;
+        const fmtHalf = (h) => h ? `ROI ${h.roi.toFixed(1)}% (n=${h.n})` : 'データなし';
+        md += `- 時系列安定性: 前半${tss && tss.firstHalf ? ` ${fmtHalf(tss.firstHalf)}` : ' データなし'} ／ 後半${tss && tss.secondHalf ? ` ${fmtHalf(tss.secondHalf)}` : ' データなし'}
 
 `;
 
         md += `## 2. クラス別詳細レポート
 `;
-        md += `| クラス | サンプル | 的中率 | 連対率 | 複勝率 | 回収率 | EV |
-|---|---|---|---|---|---|---|
+        md += `| クラス | サンプル | 的中率 | 的中率95%CI | 連対率 | 複勝率 | 回収率 | EV |
+|---|---|---|---|---|---|---|---|
 `;
+        const fmtCIPct = (ci) => ci ? `${(ci.lo * 100).toFixed(1)}〜${(ci.hi * 100).toFixed(1)}%` : '-';
         stats.forEach(s => {
-            md += `| ${s.cls} | ${s.sample} | ${s.winRate.toFixed(1)}% (${s.wins}/${s.sample}) | ${s.top2Rate.toFixed(1)}% (${s.top2}/${s.sample}) | ${s.top3Rate.toFixed(1)}% (${s.top3}/${s.sample}) | ${s.roi.toFixed(1)}% | ${s.avgEv.toFixed(3)} |
+            md += `| ${s.cls} | ${s.sample} | ${s.winRate.toFixed(1)}% (${s.wins}/${s.sample}) | ${fmtCIPct(s.winRateCI95)} | ${s.top2Rate.toFixed(1)}% (${s.top2}/${s.sample}) | ${s.top3Rate.toFixed(1)}% (${s.top3}/${s.sample}) | ${s.roi.toFixed(1)}% | ${s.avgEv.toFixed(3)} |
 `;
         });
 
@@ -2421,11 +2492,11 @@ document.addEventListener('DOMContentLoaded', () => {
 ## 3. 推奨度別パフォーマンス（シミュレーション: SSS/SS/S/Low）
 `;
         const fmtHitRateMd = (hits, total) => total > 0 ? `${(hits / total * 100).toFixed(1)}% (${hits}/${total})` : '-';
-        md += `| 推奨度 | レース数 | 単勝投資 | 単勝的中率 | 単勝回収率 | 三連複投資 | 三連複的中率 | 三連複回収率 | 合算投資 | 合算回収率 |
-|---|---|---|---|---|---|---|---|---|---|
+        md += `| 推奨度 | レース数 | 単勝投資 | 単勝的中率 | 単勝的中率95%CI | 単勝回収率 | 三連複投資 | 三連複的中率 | 三連複回収率 | 合算投資 | 合算回収率 |
+|---|---|---|---|---|---|---|---|---|---|---|
 `;
         recStats.forEach(s => {
-            md += `| ${s.rec} | ${s.raceCount} | ${s.winInvest.toLocaleString()}円 | ${fmtHitRateMd(s.winHits, s.winBetRaces)} | ${s.winROI.toFixed(1)}% | ${s.trioInvest.toLocaleString()}円 | ${fmtHitRateMd(s.trioHits, s.trioBetRaces)} | ${s.trioROI.toFixed(1)}% | ${s.totalInvest.toLocaleString()}円 | ${s.totalROI.toFixed(1)}% |
+            md += `| ${s.rec} | ${s.raceCount} | ${s.winInvest.toLocaleString()}円 | ${fmtHitRateMd(s.winHits, s.winBetRaces)} | ${fmtCIPct(s.winRateCI95)} | ${s.winROI.toFixed(1)}% | ${s.trioInvest.toLocaleString()}円 | ${fmtHitRateMd(s.trioHits, s.trioBetRaces)} | ${s.trioROI.toFixed(1)}% | ${s.totalInvest.toLocaleString()}円 | ${s.totalROI.toFixed(1)}% |
 `;
         });
 
@@ -2483,7 +2554,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 ### 手順（この順で実行）
 1. 【最優先・H2】evCalibration.winCore.slope を確認し、値と判定を回答の最初に宣言する（0.85〜1.15なら較正OK。範囲外なら、個別パラメータの調整より先に EV計算式＝スコア配点・予想勝率算出の補正を提案の第1候補にする。all は N等を含む参考値）。
-2. クラス別・推奨度別・EV帯別・オッズ帯別の表から、回収率が明確に高い／低いセグメントを特定する。必ずサンプル数 n を併記する。
+2. クラス別・推奨度別・EV帯別・オッズ帯別の表から、回収率が明確に高い／低いセグメントを特定する。必ずサンプル数 n を併記する。表に95%信頼区間（CI）がある場合は必ず考慮し、CIが100%を跨ぐ回収率・区間が広すぎる的中率を根拠の中心にしない。
 3. 変更すべきパラメータ（クラス境界EV、MAO係数、Amber係数、SS密度閾値、ユニット配分、三連複SKIP条件）を「現行値 → 提案値」の具体的な数値で提案する。
 
 ### 制約
@@ -2517,7 +2588,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 【ステップ②: 検証】各提案を個別に査定する。
 判定軸:
-1. 統計的妥当性: 根拠の n は十分か（n<30は要注意、n<10は原則却下）。回収率の差はその n で偶然生じうる範囲ではないか。単勝回収率は高オッズ的中1本で大きく振れる点に特に注意する。
+1. 統計的妥当性: 根拠の n は十分か（n<30は要注意、n<10は原則却下）。回収率の差はその n で偶然生じうる範囲ではないか。単勝回収率は高オッズ的中1本で大きく振れる点に特に注意する。95%CIが併記されている場合は区間で判断する（点推定の差ではなくCIの重なり・100%跨ぎを確認）。
 2. 多重比較: クラス×EV帯×オッズ帯を総当たりで眺めれば偶然の凸凹は必ず見つかる。そのセグメントに構造的な理由（オッズ市場の歪み、ロジック上の必然）を説明できない提案は割り引く。
 3. 過学習リスク: 特定期間・特定会場・特定条件への過剰適合ではないか。今後のレースにも汎化するか。
 4. 内部整合性: クラス境界の連続性（変更で隙間・重複が生じないか）、MAO／Amber／SS密度／推奨度の定義との矛盾、単勝ユニット配分との整合。
