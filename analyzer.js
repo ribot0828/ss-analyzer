@@ -1075,6 +1075,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderRecommendationTable(stats) {
         const recColors = { 'SSS': 'text-yellow-300', 'SS': 'text-orange-400', 'S': 'text-blue-400', 'Low': 'text-slate-400' };
         const fmtHitRate = (hits, total) => total > 0 ? `${(hits / total * 100).toFixed(1)}% (${hits}/${total})` : '-';
+        const fmtCIPctUI = (ci) => ci ? `${(ci.lo * 100).toFixed(1)}〜${(ci.hi * 100).toFixed(1)}%` : '-';
         let html = `
             <div class="overflow-x-auto">
                 <table class="analysis-table w-full text-sm">
@@ -1084,6 +1085,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             <th>レース数</th>
                             <th>単勝投資</th>
                             <th>単勝的中率</th>
+                            <th>単勝的中率95%CI</th>
                             <th>単勝回収率</th>
                             <th>三連複投資</th>
                             <th>三連複的中率</th>
@@ -1104,6 +1106,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 <td>${s.raceCount}</td>
                                 <td>${s.winInvest.toLocaleString()}円</td>
                                 <td>${fmtHitRate(s.winHits, s.winBetRaces)}</td>
+                                <td>${fmtCIPctUI(s.winRateCI95)}</td>
                                 <td class="${s.winROI >= 100 ? 'text-green-400 font-bold' : ''}">${s.winROI.toFixed(1)}%</td>
                                 <td>${s.trioInvest.toLocaleString()}円</td>
                                 <td>${fmtHitRate(s.trioHits, s.trioBetRaces)}</td>
@@ -1718,6 +1721,13 @@ document.addEventListener('DOMContentLoaded', () => {
         
         const streakEl = document.getElementById('stat-losing-streak');
         if(streakEl) streakEl.textContent = `${s.maxWinLosingStreak}連敗`;
+
+        const winRoiCiEl = document.getElementById('stat-win-roi-ci');
+        if(winRoiCiEl) {
+            winRoiCiEl.textContent = s.winRoiBootstrapCI95
+                ? `${s.winRoiBootstrapCI95.lo.toFixed(1)}〜${s.winRoiBootstrapCI95.hi.toFixed(1)}%`
+                : 'サンプル不足(n<10)';
+        }
     }
 
     function renderRiskAnalysisDetails(s) {
@@ -1745,6 +1755,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function renderClassTable(stats) {
+        const fmtCIPctUI = (ci) => ci ? `${(ci.lo * 100).toFixed(1)}〜${(ci.hi * 100).toFixed(1)}%` : '-';
         let html = `
             <div class="overflow-x-auto">
                 <table class="analysis-table w-full text-sm">
@@ -1753,6 +1764,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             <th>クラス</th>
                             <th>頭数</th>
                             <th>的中率</th>
+                            <th>的中率95%CI</th>
                             <th>連対率</th>
                             <th>複勝率</th>
                             <th>回収率</th>
@@ -1765,6 +1777,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 <td class="font-bold">${s.sample >= 30 ? '✅' : '⚠️'} ${s.cls}</td>
                                 <td>${s.sample}</td>
                                 <td>${s.winRate.toFixed(1)}% (${s.wins}/${s.sample})</td>
+                                <td>${fmtCIPctUI(s.winRateCI95)}</td>
                                 <td>${s.top2Rate.toFixed(1)}% (${s.top2}/${s.sample})</td>
                                 <td>${s.top3Rate.toFixed(1)}% (${s.top3}/${s.sample})</td>
                                 <td class="${s.roi >= 100 ? 'text-green-400 font-bold' : ''}">${s.roi.toFixed(1)}%</td>
