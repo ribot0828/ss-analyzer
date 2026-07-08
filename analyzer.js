@@ -38,6 +38,13 @@ document.addEventListener('DOMContentLoaded', () => {
         "最終確定クラス", "着順", "MAO", "実行フラグ", "単勝払戻", "ワイド払戻", "三連複払戻", "三連単払戻"
     ];
 
+    // ss-engine-v2 CSVエクスポートで末尾に追加された新規列（後方互換: 無ければ "-" 扱い）
+    const NEW_OPTIONAL_COLUMNS = [
+        "発走時刻", "オッズ最終更新時刻", "天候", "馬場状態", "走破タイム", "着差", "上がり3F", "通過順", "ロジックVer"
+    ];
+    // 「統合」CSVエクスポート用ヘッダー（既存列+新規列。既存列の並び・内容は変更しない）
+    const EXPECTED_HEADERS_WITH_NEW = EXPECTED_HEADERS.concat(NEW_OPTIONAL_COLUMNS);
+
     // --- 共通フィールドアクセサ ---
     // 判定（クラス分類・EV・勝率・MAO・Amber・SS密度・推奨度・オッズ帯ビニング）は購入時オッズ基準で行う。
     // evOf/clsOf は購入時値優先（欠損時のみ最終確定値にフォールバック）。
@@ -152,6 +159,23 @@ document.addEventListener('DOMContentLoaded', () => {
             Object.assign(normalizedRow, ctx);
             if (normalizedRow["開催場所"] && normalizedRow["開催場所"].trim() && normalizedRow["開催場所"].trim() !== "-") {
                 normalizedRow.venue = normalizedRow["開催場所"].trim();
+            }
+
+            // --- 新規列（末尾追加）の後方互換対応: 列が無い/空欄なら "-" ---
+            NEW_OPTIONAL_COLUMNS.forEach(col => {
+                const v = normalizedRow[col];
+                normalizedRow[col] = (v !== undefined && v !== null && String(v).trim() !== "") ? String(v).trim() : "-";
+            });
+            // 馬場状態: 専用列が無ければ「コース詳細」内の "馬場:良" 表記からフォールバック抽出
+            // 例: "芝1200m (右 A) / 天候:晴 / 馬場:良"
+            if (normalizedRow["馬場状態"] === "-") {
+                const mBaba = (normalizedRow["コース詳細"] || "").match(/馬場:([^\s/]+)/);
+                if (mBaba) normalizedRow["馬場状態"] = mBaba[1];
+            }
+            // 天候も同様に「コース詳細」からフォールバック
+            if (normalizedRow["天候"] === "-") {
+                const mWeather = (normalizedRow["コース詳細"] || "").match(/天候:([^\s/]+)/);
+                if (mWeather) normalizedRow["天候"] = mWeather[1];
             }
 
             // 近走監査の読み取りとauditStatus付与
@@ -1326,6 +1350,217 @@ document.addEventListener('DOMContentLoaded', () => {
         return evBins;
     }
 
+    // --- 派生指標（新規CSV列ベース）: winCoreクラス定義 & 実行フラグ判定 ---
+    // ※既存の calibration/simulateRace 用 WIN_CORE_CLASSES（A2含む7クラス）とは別に、
+    //   今回の派生指標の集計仕様として指定された6クラスをここで定義する。
+    const MARGIN_WINCORE_CLASSES = ['A3', 'B1', 'B2', 'B3', 'X', 'D1'];
+    const isExecutedBet = r => {
+        const v = (r && r["実行フラグ"] || "").trim();
+        return v === '○' || v === '〇';
+    };
+
+    // "1:07.5"→67.5秒 / "67.5"→67.5秒。パース不能・"-"は null
+    function parseRaceTimeSec(str) {
+        if (str === undefined || str === null) return null;
+        const s = String(str).trim();
+        if (!s || s === '-') return null;
+        const m = s.match(/^(\d+):(\d+(?:\.\d+)?)$/);
+        if (m) return parseInt(m[1], 10) * 60 + parseFloat(m[2]);
+        const f = parseFloat(s);
+        return isNaN(f) ? null : f;
+    }
+
+    // "日付"("YYYY-MM-DD")+"発走時刻"("HH:mm") → Date（失敗時 null）
+    function parsePostDateTime(dateStr, timeStr) {
+        if (!dateStr || !timeStr || dateStr === '-' || timeStr === '-') return null;
+        const d = new Date(`${dateStr.trim()}T${timeStr.trim()}:00`);
+        return isNaN(d.getTime()) ? null : d;
+    }
+    // "オッズ最終更新時刻"("YYYY-MM-DD HH:mm") → Date（失敗時 null）
+    function parseOddsUpdateDateTime(str) {
+        if (!str || str === '-') return null;
+        const d = new Date(`${str.trim().replace(' ', 'T')}:00`);
+        return isNaN(d.getTime()) ? null : d;
+    }
+
+    // a. marginAnalysis: 1着とのタイム差をクラス別に集計
+    function computeMarginAnalysis(rows) {
+        const raceMap = {};
+        (rows || []).forEach(r => {
+            const id = getRaceId(r);
+            if (!raceMap[id]) raceMap[id] = [];
+            raceMap[id].push(r);
+        });
+
+        const clsAgg = {}; // cls -> { sumDiff, within1s, n }
+        Object.values(raceMap).forEach(raceRows => {
+            const winner = raceRows.find(r => finishOf(r) === 1);
+            const winnerTime = winner ? parseRaceTimeSec(winner["走破タイム"]) : null;
+
+            raceRows.forEach(r => {
+                const cls = clsOf(r);
+                if (!cls) return;
+
+                let diff = null;
+                if (finishOf(r) === 1) {
+                    diff = 0; // 着順1着はタイム差0
+                } else if (winnerTime !== null) {
+                    const t = parseRaceTimeSec(r["走破タイム"]);
+                    if (t !== null) diff = t - winnerTime;
+                }
+                if (diff === null) return;
+
+                if (!clsAgg[cls]) clsAgg[cls] = { sumDiff: 0, within1s: 0, n: 0 };
+                clsAgg[cls].sumDiff += diff;
+                if (Math.abs(diff) <= 1.0) clsAgg[cls].within1s++;
+                clsAgg[cls].n++;
+            });
+        });
+
+        return Object.keys(clsAgg).sort().map(cls => {
+            const a = clsAgg[cls];
+            return {
+                cls: cls,
+                samples: a.n,
+                avgTimeDiffSec: a.n > 0 ? a.sumDiff / a.n : 0,
+                within1secRate: a.n > 0 ? (a.within1s / a.n) * 100 : 0.0
+            };
+        });
+    }
+
+    // b. betTimingAnalysis: 発走時刻とオッズ最終更新時刻の差（分）の分布
+    function computeBetTimingAnalysis(rows) {
+        const raceRepMap = {}; // raceId -> 代表行（レース単位の値のため先頭行で十分）
+        (rows || []).forEach(r => {
+            const id = getRaceId(r);
+            if (!raceRepMap[id]) raceRepMap[id] = r;
+        });
+
+        const minutesList = [];
+        let excludedCount = 0;
+        Object.values(raceRepMap).forEach(r => {
+            const post = parsePostDateTime(r["日付"], r["発走時刻"]);
+            const oddsUpdate = parseOddsUpdateDateTime(r["オッズ最終更新時刻"]);
+            if (!post || !oddsUpdate) return;
+            const diffMin = (post.getTime() - oddsUpdate.getTime()) / 60000;
+            if (diffMin < 0 || diffMin > 300) { excludedCount++; return; }
+            minutesList.push(diffMin);
+        });
+        minutesList.sort((x, y) => x - y);
+
+        const pct = (p) => {
+            if (minutesList.length === 0) return null;
+            const idx = Math.min(minutesList.length - 1, Math.floor(p * minutesList.length));
+            return minutesList[idx];
+        };
+
+        return {
+            samples: minutesList.length,
+            excludedCount: excludedCount,
+            medianMinutes: pct(0.5),
+            p10Minutes: pct(0.10),
+            p90Minutes: pct(0.90)
+        };
+    }
+
+    // c. favoriteStructureAnalysis: 1番人気オッズの厚み別に実行済みwinCoreベットの回収率を比較
+    function computeFavoriteStructureAnalysis(rows) {
+        const raceMap = {};
+        (rows || []).forEach(r => {
+            const id = getRaceId(r);
+            if (!raceMap[id]) raceMap[id] = [];
+            raceMap[id].push(r);
+        });
+
+        const raceFavMap = {}; // raceId -> { fav1Odds, fav3OddsSum }
+        Object.keys(raceMap).forEach(id => {
+            const horses = raceMap[id];
+            // 最終確定人気列があればそれを優先、無ければ確定オッズ昇順で導出
+            let ranked = horses.filter(h => {
+                const p = parseInt(h["最終確定人気"]);
+                return !isNaN(p) && p >= 1 && p <= 3;
+            });
+            let odds3;
+            if (ranked.length >= 3) {
+                ranked.sort((a, b) => parseInt(a["最終確定人気"]) - parseInt(b["最終確定人気"]));
+                odds3 = ranked.slice(0, 3).map(h => oddsOf(h));
+            } else {
+                const sorted = horses.filter(h => oddsOf(h) > 0).sort((a, b) => oddsOf(a) - oddsOf(b));
+                odds3 = sorted.slice(0, 3).map(h => oddsOf(h));
+            }
+            if (odds3.length === 0) return;
+            raceFavMap[id] = { fav1Odds: odds3[0], fav3OddsSum: odds3.reduce((a, b) => a + b, 0) };
+        });
+
+        const buckets = {
+            under2: { invest: 0, return: 0, hits: 0, n: 0 },
+            over2: { invest: 0, return: 0, hits: 0, n: 0 }
+        };
+        (rows || []).forEach(r => {
+            if (!MARGIN_WINCORE_CLASSES.includes(clsOf(r))) return;
+            if (!isExecutedBet(r)) return;
+            const fav = raceFavMap[getRaceId(r)];
+            if (!fav) return;
+
+            const bucket = fav.fav1Odds < 2.0 ? buckets.under2 : buckets.over2;
+            bucket.n++;
+            bucket.invest += 100;
+            if (finishOf(r) === 1) {
+                bucket.return += oddsOf(r) * 100;
+                bucket.hits++;
+            }
+        });
+
+        const summarize = (b) => ({
+            samples: b.n,
+            recoveryRate: b.invest > 0 ? (b.return / b.invest) * 100 : 0.0,
+            hitRate: b.n > 0 ? (b.hits / b.n) * 100 : 0.0
+        });
+
+        return {
+            fav1OddsUnder2: summarize(buckets.under2),
+            fav1OddsOver2: summarize(buckets.over2)
+        };
+    }
+
+    // d. equityCurveStats: 実行フラグ○×winCoreの単勝ベットを日付順に並べ、累積損益(U=100円)からDD・連敗数を算出
+    function computeEquityCurveStats(rows) {
+        const bets = (rows || []).filter(r => MARGIN_WINCORE_CLASSES.includes(clsOf(r)) && isExecutedBet(r));
+        bets.sort((a, b) => {
+            const dateA = a["日付"] || "";
+            const dateB = b["日付"] || "";
+            if (dateA !== dateB) return dateA.localeCompare(dateB);
+            const idA = getRaceId(a), idB = getRaceId(b);
+            if (idA !== idB) return idA.localeCompare(idB);
+            return (parseInt(a["馬番"]) || 0) - (parseInt(b["馬番"]) || 0);
+        });
+
+        let cumulativeU = 0, hwmU = 0, maxDDU = 0;
+        let currentStreak = 0, maxStreak = 0;
+        bets.forEach(r => {
+            const win = finishOf(r) === 1;
+            const pnlU = win ? (oddsOf(r) - 1) : -1; // 1U=100円のベット、勝ちは(オッズ-1)U、負けは-1U
+            cumulativeU += pnlU;
+            if (cumulativeU > hwmU) hwmU = cumulativeU;
+            const ddU = hwmU - cumulativeU;
+            if (ddU > maxDDU) maxDDU = ddU;
+
+            if (win) {
+                currentStreak = 0;
+            } else {
+                currentStreak++;
+                if (currentStreak > maxStreak) maxStreak = currentStreak;
+            }
+        });
+
+        return {
+            betCount: bets.length,
+            finalPnlUnits: cumulativeU,
+            maxDrawdownUnits: maxDDU,
+            maxLosingStreak: maxStreak
+        };
+    }
+
     // --- JSONエクスポート処理 ---
     function generateAndDownloadJSON() {
         if (!window.latestSimData) {
@@ -1626,7 +1861,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     actualWinRateCI95: s.actualWinRateCI95 ? { lo: s.actualWinRateCI95.lo * 100, hi: s.actualWinRateCI95.hi * 100 } : null,
                     ratio: s.ratio,
                     marketSupportRate: s.marketSupportRate !== null && s.marketSupportRate !== undefined ? s.marketSupportRate * 100 : null
-                }))
+                })),
+                // --- 新規CSV列（発走時刻/オッズ最終更新時刻/天候/馬場状態/走破タイム/着差/上がり3F/通過順/ロジックVer）由来の派生指標 ---
+                // 旧CSV（新列なし）では該当データが無いため各値はn=0/nullになる
+                marginAnalysis: computeMarginAnalysis(rowsWithRank),
+                betTimingAnalysis: computeBetTimingAnalysis(rowsWithRank),
+                favoriteStructureAnalysis: computeFavoriteStructureAnalysis(rowsWithRank),
+                equityCurveStats: computeEquityCurveStats(rowsWithRank)
             };
 
             // --- 出力最適化: サンプル0の項目を除去 / 数値を丸め / 改行・空白を排してファイルを軽量化 ---
@@ -2802,13 +3043,13 @@ document.addEventListener('DOMContentLoaded', () => {
         sortedData.forEach(row => {
             const currentRaceId = getRaceId(row);
             if (lastRaceId !== "" && lastRaceId !== currentRaceId) {
-                outputRows.push(Array(EXPECTED_HEADERS.length).fill(""));
+                outputRows.push(Array(EXPECTED_HEADERS_WITH_NEW.length).fill(""));
             }
-            outputRows.push(EXPECTED_HEADERS.map(h => row[h] || ""));
+            outputRows.push(EXPECTED_HEADERS_WITH_NEW.map(h => row[h] || ""));
             lastRaceId = currentRaceId;
         });
 
-        const csvContent = Papa.unparse({ fields: EXPECTED_HEADERS, data: outputRows });
+        const csvContent = Papa.unparse({ fields: EXPECTED_HEADERS_WITH_NEW, data: outputRows });
         const blob = new Blob(["\uFEFF" + csvContent], { type: 'text/csv;charset=utf-8;' });
 
         // 最新日付をファイル名に含める
