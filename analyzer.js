@@ -1401,10 +1401,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 const cls = clsOf(r);
                 if (!cls) return;
 
+                // タイムデータの無いレース（旧CSV）は勝ち馬含め集計対象外（勝ち馬のみdiff=0計上による歪み防止）
+                if (winnerTime === null) return;
+
                 let diff = null;
                 if (finishOf(r) === 1) {
                     diff = 0; // 着順1着はタイム差0
-                } else if (winnerTime !== null) {
+                } else {
                     const t = parseRaceTimeSec(r["走破タイム"]);
                     if (t !== null) diff = t - winnerTime;
                 }
