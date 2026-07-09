@@ -950,10 +950,11 @@ document.addEventListener('DOMContentLoaded', () => {
         };
 
         // --- R3: 単勝優先順位・先頭1点のみ／3U固定 ---
+        // Low推奨度はエンジン(winTargets空)・バックテストR3とも全スキップのため、ここでも購入しない
         const r3Bets = [];
         let skippedRaces = 0;
         sortedRaces.forEach(r => {
-            const pick = r.finalWinBets && r.finalWinBets[0];
+            const pick = (r.rec !== 'Low') && r.finalWinBets && r.finalWinBets[0];
             if (!pick) {
                 skippedRaces++;
                 return;
