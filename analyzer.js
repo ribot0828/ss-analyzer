@@ -443,6 +443,14 @@ document.addEventListener('DOMContentLoaded', () => {
             renderRiskAnalysisDetails(riskStats);
             drawEquityCurve(simulatedRaces);
 
+            let smallBankSim = null;
+            try {
+                smallBankSim = computeSmallBankSimulation(simulatedRaces);
+                renderSmallBankSimulation(smallBankSim);
+            } catch (e) {
+                console.error("Small Bank Simulation rendering error:", e);
+            }
+
             initRankEvTabs(rowsWithRank);
             renderRankEvAnalysis('S', rowsWithRank);
 
@@ -462,7 +470,7 @@ document.addEventListener('DOMContentLoaded', () => {
             geminiOutput.value = aiPrompts.gemini;
             claudeOutput.value = aiPrompts.claude;
 
-            window.latestSimData = { rowsWithRank, riskStats, classStats, amberStats, recStats, simulatedRaces, calibrationStats };
+            window.latestSimData = { rowsWithRank, riskStats, classStats, amberStats, recStats, simulatedRaces, calibrationStats, smallBankSim };
 
             const jsonBtn = document.getElementById('downloadJsonBtn');
             if (jsonBtn) jsonBtn.classList.remove('hidden');
@@ -857,6 +865,119 @@ document.addEventListener('DOMContentLoaded', () => {
             refTrioInvest: refTrioInvest,
             refTrioReturn: refTrioReturn
         };
+    }
+
+    // --- 小資金モード(R3)シミュレーション ---
+    // 残高2万円未満時の運用ルール（ss-engine-v2 バックテストR3採用・2026-07-09導入）を
+    // 過去データに適用した場合の成績を、既存の「現行フル配分」と比較する。
+    // R3: 各レースの単勝優先順位リスト(finalWinBets)の先頭1点のみに3U(300円)固定でベット。
+    //     買い目が無い（finalWinBetsが空）レースはノーベット扱い。資金残高推移は考慮しないフラット計測。
+    function computeSmallBankSimulation(simulatedRaces) {
+        const sortedRaces = [...simulatedRaces].sort(byRaceDateOrder);
+
+        // simulateRace内の単勝払戻決定ロジック（L738-767相当）をそのまま複製し、
+        // 指定馬の単勝払戻（1Uあたり=100円単位）を求める。独自の払戻ロジックは新設しない。
+        const derivePayoutPerUnit = (raceHorses, pick) => {
+            const dateStr = (raceHorses[0] && raceHorses[0]["日付"]) ? raceHorses[0]["日付"].trim() : "";
+            const forceRecalculateWin = dateStr === "Legacy" || dateStr === "" || dateStr < "2026-04-05";
+            let actualWinPayoutMap = {};
+            raceHorses.forEach(h => {
+                if (forceRecalculateWin && finishOf(h) === 1) {
+                    const odds = oddsOf(h);
+                    if (odds > 0) actualWinPayoutMap[h["馬番"]] = Math.round(odds * 10) * 10;
+                } else {
+                    const w = parseColonPayout(h["単勝払戻"]);
+                    if (w.key !== null && w.pay > 0) {
+                        actualWinPayoutMap[w.key] = w.pay;
+                    } else if (w.pay > 0) {
+                        actualWinPayoutMap[h["馬番"]] = w.pay;
+                    } else if (finishOf(h) === 1) {
+                        const odds = oddsOf(h);
+                        if (odds > 0) actualWinPayoutMap[h["馬番"]] = Math.round(odds * 10) * 10;
+                    }
+                }
+            });
+            const umaban = pick["馬番"];
+            if (actualWinPayoutMap[umaban]) return actualWinPayoutMap[umaban];
+            return oddsOf(pick) * 100; // フォールバック（既存ロジックと同一）
+        };
+
+        // 損益系列から統計量を算出（betList: [{invest, payout}], 日付順ソート済み前提）
+        const summarizeBets = (betList) => {
+            let invest = 0, payout = 0, hits = 0;
+            let cumulativeU = 0, hwmU = 0, maxDDU = 0;
+            let currentLosingStreak = 0, maxLosingStreak = 0;
+
+            betList.forEach(b => {
+                invest += b.invest;
+                payout += b.payout;
+                if (b.payout > 0) hits++;
+
+                const pnlU = (b.payout - b.invest) / 100.0;
+                cumulativeU += pnlU;
+                if (cumulativeU > hwmU) hwmU = cumulativeU;
+                const ddU = hwmU - cumulativeU;
+                if (ddU > maxDDU) maxDDU = ddU;
+
+                if (b.payout <= 0) {
+                    currentLosingStreak++;
+                    if (currentLosingStreak > maxLosingStreak) maxLosingStreak = currentLosingStreak;
+                } else {
+                    currentLosingStreak = 0;
+                }
+            });
+
+            const halfSize = Math.ceil(betList.length / 2);
+            const summarizeHalf = (arr) => {
+                if (arr.length === 0) return { n: 0, recoveryRate: 0 };
+                let inv = 0, ret = 0;
+                arr.forEach(b => { inv += b.invest; ret += b.payout; });
+                return { n: arr.length, recoveryRate: inv > 0 ? (ret / inv) * 100 : 0 };
+            };
+
+            return {
+                betCount: betList.length,
+                invest,
+                payout,
+                recoveryRate: invest > 0 ? (payout / invest) * 100 : 0,
+                hitRate: betList.length > 0 ? (hits / betList.length) * 100 : 0,
+                finalPnlUnits: cumulativeU,
+                maxDrawdownUnits: maxDDU,
+                maxLosingStreak,
+                firstHalf: summarizeHalf(betList.slice(0, halfSize)),
+                secondHalf: summarizeHalf(betList.slice(halfSize))
+            };
+        };
+
+        // --- R3: 単勝優先順位・先頭1点のみ／3U固定 ---
+        const r3Bets = [];
+        let skippedRaces = 0;
+        sortedRaces.forEach(r => {
+            const pick = r.finalWinBets && r.finalWinBets[0];
+            if (!pick) {
+                skippedRaces++;
+                return;
+            }
+            const invest = 300; // 3U固定
+            let payout = 0;
+            if (finishOf(pick) === 1) {
+                payout = derivePayoutPerUnit(r.horses, pick) * 3;
+            }
+            r3Bets.push({ invest, payout });
+        });
+
+        // --- 現行フル配分（既存ユニットテーブルベース）: winInvest>0のレースのみ ---
+        // r.winInvest / r.winReturn は simulateRace が既に算出済みの値をそのまま再利用する。
+        const fullBets = sortedRaces
+            .filter(r => r.winInvest > 0)
+            .map(r => ({ invest: r.winInvest, payout: r.winReturn }));
+
+        const r3Result = summarizeBets(r3Bets);
+        r3Result.skippedRaces = skippedRaces;
+        r3Result.fullAllocation = summarizeBets(fullBets);
+        r3Result.fullAllocation.skippedRaces = sortedRaces.length - fullBets.length;
+
+        return r3Result;
     }
 
     function wilsonCI(k, n) {
@@ -2168,6 +2289,57 @@ document.addEventListener('DOMContentLoaded', () => {
         if (section) section.classList.remove('hidden');
     }
 
+    // --- 小資金モード(R3)シミュレーション UI表示 ---
+    function renderSmallBankSimulation(sim) {
+        const area = document.getElementById('derivedSmallBankSimArea');
+        if (!area) return;
+        if (!sim) {
+            area.innerHTML = `<p class="text-sm text-slate-400">データなし</p>`;
+            return;
+        }
+        const full = sim.fullAllocation || {};
+        const row = (label, s) => `
+            <tr>
+                <td class="font-bold">${label}</td>
+                <td>${s.betCount ?? 0}</td>
+                <td>${Math.round(s.invest ?? 0).toLocaleString()}円</td>
+                <td>${Math.round(s.payout ?? 0).toLocaleString()}円</td>
+                <td class="${(s.recoveryRate ?? 0) >= 100 ? 'text-green-400 font-bold' : ''}">${(s.recoveryRate ?? 0).toFixed(1)}%</td>
+                <td>${(s.hitRate ?? 0).toFixed(1)}%</td>
+                <td class="${(s.finalPnlUnits ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}">${(s.finalPnlUnits ?? 0).toFixed(1)}U</td>
+                <td>${(s.maxDrawdownUnits ?? 0).toFixed(1)}U</td>
+                <td>${s.maxLosingStreak ?? 0}</td>
+            </tr>
+        `;
+        area.innerHTML = `
+            <div class="overflow-x-auto">
+                <table class="analysis-table w-full text-sm">
+                    <thead>
+                        <tr>
+                            <th>モード</th>
+                            <th>ベット数</th>
+                            <th>投資</th>
+                            <th>払戻</th>
+                            <th>回収率</th>
+                            <th>的中率</th>
+                            <th>最終損益(U)</th>
+                            <th>最大DD(U)</th>
+                            <th>最大連敗</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${row('現行フル', full)}
+                        ${row('R3(小資金)', sim)}
+                    </tbody>
+                </table>
+            </div>
+            <p class="text-xs text-slate-500 mt-2">
+                ※R3＝各レースの単勝優先最上位1点に3U固定（残高2万円未満時の採用ルール・2026-07-09）。資金残高の推移は考慮しないフラット計測。
+                買い目なし（ノーベット）: 現行フル ${full.skippedRaces ?? 0}レース / R3 ${sim.skippedRaces ?? 0}レース
+            </p>
+        `;
+    }
+
     // --- JSONエクスポート処理 ---
     function generateAndDownloadJSON() {
         if (!window.latestSimData) {
@@ -2176,7 +2348,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         
         try {
-            const { rowsWithRank, classStats, riskStats, amberStats, recStats, simulatedRaces, calibrationStats } = window.latestSimData;
+            const { rowsWithRank, classStats, riskStats, amberStats, recStats, simulatedRaces, calibrationStats, smallBankSim } = window.latestSimData;
             const totalRaces = parseInt(document.getElementById('stat-race-count')?.textContent || '0') || 0;
             const overallRoi = parseFloat(document.getElementById('stat-overall-roi')?.textContent || '0') || 0;
 
@@ -2483,7 +2655,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 runningStyleAnalysis: computeRunningStyleAnalysis(rowsWithRank),
                 trackConditionAnalysis: computeTrackConditionAnalysis(rowsWithRank),
                 // --- 仮説登録簿（B-2）: 判定はdataFrom以降のデータのみ（後知恵防止） ---
-                hypothesisRegistry: computeHypothesisRegistry(rowsWithRank)
+                hypothesisRegistry: computeHypothesisRegistry(rowsWithRank),
+                // --- 小資金モード(R3)シミュレーション: 現行フル配分との比較（2026-07-09導入） ---
+                smallBankSimulation: smallBankSim || null
             };
 
             // --- 出力最適化: サンプル0の項目を除去 / 数値を丸め / 改行・空白を排してファイルを軽量化 ---
