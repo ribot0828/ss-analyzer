@@ -25,6 +25,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const filterSurface = document.getElementById('filter-surface');
     const filterCondition = document.getElementById('filter-condition');
     const filterDistCat = document.getElementById('filter-dist-cat');
+    const filterPeriod = document.getElementById('filterPeriod');
 
     // State
     let allData = new Map(); 
@@ -70,6 +71,57 @@ document.addEventListener('DOMContentLoaded', () => {
         { label: '30.0〜39.9', min: 30.0, max: 40.0 },
         { label: '40.0〜49.9', min: 40.0, max: 50.0 },
         { label: '50.0以上', min: 50.0, max: 999999 }
+    ];
+
+    // --- B-2: 仮説登録簿 ---
+    // 各仮説の判定は dataFrom 以降の日付の行のみを使う（後知恵防止）。
+    // compute(rows) は dataFrom で絞り込み済みの行を受け取り {n, hits, recovery, note?} を返す。null は手動判定。
+    // ※compute 内で参照するヘルパー（isExecutedBet 等）は後方で定義されるが、呼び出しは解析実行時のため問題ない。
+    const HYPOTHESIS_REGISTRY = [
+        {
+            id: 'h1', name: 'D1 MAO撤退監視', registeredOn: '2026-07-05', dataFrom: '2026-07-05', direction: '削る',
+            condition: 'D1の購入時オッズ40.0〜49.9倍帯: 累積n≧60・的中≧2・回収>100%でMAO係数1.00へ戻す',
+            compute: rows => hypoStat(rows.filter(r => isExecutedBet(r) && clsOf(r) === 'D1' && buyOddsOf(r) >= 40.0 && buyOddsOf(r) < 50.0))
+        },
+        {
+            id: 'h2', name: 'X撤退条件', registeredOn: '2026-07-08', dataFrom: '2026-07-08', direction: '削る',
+            condition: '実運用X: n≧50で的中0なら購入停止',
+            compute: rows => hypoStat(rows.filter(r => isExecutedBet(r) && clsOf(r) === 'X'))
+        },
+        {
+            id: 'h3', name: 'SSS三連複SKIP', registeredOn: '2026-07-05', dataFrom: '2026-06-20', direction: '削る',
+            condition: '軸1頭ながし方式のみでSSS n≧50・回収<100%継続なら再審議',
+            compute: null // 手動判定（三連複の方式別集計は自動化対象外）
+        },
+        {
+            id: 'h4', name: 'B帯EV0.9-0.99', registeredOn: '2026-07-05', dataFrom: '2026-07-05', direction: '攻める',
+            condition: 'n≧150で両隣ビンと単調性が出なければ完全却下',
+            compute: rows => hypoStat(rows.filter(r => ratingOf(r) === 'B' && evOf(r) >= 0.9 && evOf(r) < 1.0)) // 全馬・フラット診断
+        },
+        {
+            id: 'h5', name: 'ダ1401m+縮小', registeredOn: '2026-07-08', dataFrom: '2026-07-08', direction: '削る',
+            condition: '実運用winCoreダ1401m+: 回収<100%継続で半サイズ→除外検討',
+            compute: rows => hypoStat(rows.filter(r => isExecutedBet(r) && MARGIN_WINCORE_CLASSES.includes(clsOf(r)) && surfaceOfRow(r) === 'ダ' && distanceOfRow(r) >= 1401))
+        },
+        {
+            id: 'h6', name: '重賞winCore除外', registeredOn: '2026-07-08', dataFrom: '2026-07-08', direction: '削る',
+            condition: '実運用winCore重賞: 累積n≧80・回収<100%で除外',
+            compute: rows => hypoStat(rows.filter(r => isExecutedBet(r) && MARGIN_WINCORE_CLASSES.includes(clsOf(r)) && isGradedRaceRow(r)))
+        },
+        {
+            id: 'h7', name: 'ドリフトガード', registeredOn: '2026-07-08', dataFrom: '2026-07-08', direction: '観察',
+            condition: '確定/購入オッズ>1.25のwinCore成績を観察。n≧100で判定基準を再設計',
+            compute: rows => hypoStat(rows.filter(r => {
+                if (!isExecutedBet(r) || !MARGIN_WINCORE_CLASSES.includes(clsOf(r))) return false;
+                const ratio = oddsDriftRatioOf(r);
+                return ratio !== null && ratio > 1.25;
+            }))
+        },
+        {
+            id: 'h8', name: '100倍超帯', registeredOn: '2026-07-08', dataFrom: '2026-07-08', direction: '観察',
+            condition: '実運用winCore購入時100倍以上: X撤退条件とセットで観察',
+            compute: rows => hypoStat(rows.filter(r => isExecutedBet(r) && MARGIN_WINCORE_CLASSES.includes(clsOf(r)) && buyOddsOf(r) >= 100.0))
+        }
     ];
 
     // arr から k 個選ぶ全組み合わせ（順序は元の並び順を保持）
@@ -282,18 +334,31 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // --- 実運用レースID集合: 実行フラグ('○'/'〇'/'×')が1行でもあるレース ---
+    function buildLiveRaceIdSet() {
+        const set = new Set();
+        allData.forEach(row => {
+            const flag = (row["実行フラグ"] || "").trim();
+            if (flag === '○' || flag === '〇' || flag === '×') set.add(getRaceId(row));
+        });
+        return set;
+    }
+
     // --- Filtering Engine ---
     function applyFilters() {
         const v = filterVenue.value;
         const s = filterSurface.value;
         const c = filterCondition.value;
         const d = filterDistCat.value;
+        const p = filterPeriod ? filterPeriod.value : 'all';
+        const liveRaceIds = (p === 'live') ? buildLiveRaceIdSet() : null;
 
         filteredData = Array.from(allData.values()).filter(row => {
             if (v !== 'all' && row.venue !== v) return false;
             if (s !== 'all' && row.surface !== s) return false;
             if (c !== 'all' && row.condition !== c) return false;
             if (d !== 'all' && row.distCat !== d) return false;
+            if (liveRaceIds && !liveRaceIds.has(getRaceId(row))) return false;
             return true;
         });
 
@@ -302,7 +367,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    [filterVenue, filterSurface, filterCondition, filterDistCat].forEach(el => {
+    [filterVenue, filterSurface, filterCondition, filterDistCat, filterPeriod].forEach(el => {
         el.addEventListener('change', applyFilters);
     });
 
@@ -343,6 +408,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 renderDerivedMetrics(rowsWithRank);
             } catch (e) {
                 console.error("Derived Metrics rendering error:", e);
+            }
+
+            try {
+                renderExtendedAnalysis(rowsWithRank);
+            } catch (e) {
+                console.error("Extended Analysis rendering error:", e);
+            }
+
+            try {
+                renderHypothesisRegistry(rowsWithRank);
+            } catch (e) {
+                console.error("Hypothesis Registry rendering error:", e);
             }
 
             const recStats = calculateRecommendationStats(simulatedRaces);
@@ -1570,6 +1647,399 @@ document.addEventListener('DOMContentLoaded', () => {
         };
     }
 
+    // =====================================================================
+    // --- 拡張分析（A-1〜A-4）＋仮説登録簿（B-2）用ヘルパー ---
+    // =====================================================================
+
+    // 「対象ベット」= 実行フラグ○ かつ winCore6クラス
+    function isExtendedTargetBet(r) {
+        return isExecutedBet(r) && MARGIN_WINCORE_CLASSES.includes(clsOf(r));
+    }
+
+    // 集計共通: {n, hits, recovery(%)} 回収率 = 的中行のoddsOf×100合計 ÷ (n×100) ×100
+    function hypoStat(betRows) {
+        let n = 0, hits = 0, ret = 0;
+        (betRows || []).forEach(r => {
+            n++;
+            if (finishOf(r) === 1) { hits++; ret += oddsOf(r) * 100; }
+        });
+        return { n: n, hits: hits, recovery: n > 0 ? (ret / (n * 100)) * 100 : 0.0 };
+    }
+
+    // 距離: parseCourseDetail成果物(row.distance)優先。無ければコース詳細から '1200m'/4桁 を抽出
+    function distanceOfRow(r) {
+        if (r && r.distance > 0) return r.distance;
+        const detail = (r && r["コース詳細"]) || "";
+        let m = detail.match(/(\d{3,4})\s*m/);
+        if (m) return parseInt(m[1], 10);
+        m = detail.match(/(\d{4})/);
+        return m ? parseInt(m[1], 10) : 0;
+    }
+
+    // 芝/ダ: parseCourseDetail成果物(row.surface)優先。無ければコース詳細の先出現文字で判定
+    function surfaceOfRow(r) {
+        if (r && (r.surface === '芝' || r.surface === 'ダ')) return r.surface;
+        const detail = (r && r["コース詳細"]) || "";
+        const iT = detail.indexOf('芝');
+        const iD = detail.indexOf('ダ');
+        if (iT >= 0 && (iD < 0 || iT < iD)) return '芝';
+        if (iD >= 0) return 'ダ';
+        return '-';
+    }
+
+    // 重賞判定: 「グレード・頭数」にG1/G2/G3を含む
+    function isGradedRaceRow(r) {
+        const g = (r && r["グレード・頭数"]) || "";
+        return /G[123]/.test(g);
+    }
+    // OP・L判定: OPを含む、または単独のL（英字に挟まれないL）
+    function isOpenListedRaceRow(r) {
+        const g = (r && r["グレード・頭数"]) || "";
+        if (isGradedRaceRow(r)) return false;
+        return g.includes('OP') || /(^|[^A-Za-z])L([^A-Za-z]|$)/.test(g);
+    }
+
+    // オッズドリフト比率 = 最終確定オッズ/購入時オッズ（両方>0のときのみ。欠損はnull）
+    function oddsDriftRatioOf(r) {
+        const buy = parseFloat(r && r["購入時オッズ"]);
+        const fin = parseFloat(r && r["最終確定オッズ"]);
+        if (!isFinite(buy) || buy <= 0 || !isFinite(fin) || fin <= 0) return null;
+        return fin / buy;
+    }
+
+    // --- A-1: オッズドリフト別成績 ---
+    function computeOddsDriftAnalysis(rows) {
+        const bucketDefs = [
+            { bucket: '短縮(<0.95)', test: x => x < 0.95 },
+            { bucket: '安定(0.95〜1.05)', test: x => x >= 0.95 && x <= 1.05 },
+            { bucket: '拡大(1.05〜1.25)', test: x => x > 1.05 && x <= 1.25 },
+            { bucket: '大幅拡大(>1.25)', test: x => x > 1.25 }
+        ];
+        const agg = bucketDefs.map(b => ({
+            bucket: b.bucket, test: b.test,
+            n: 0, hits: 0, ret: 0,
+            bySurface: {
+                '芝': { n: 0, hits: 0, ret: 0 },
+                'ダ': { n: 0, hits: 0, ret: 0 }
+            }
+        }));
+        let excluded = 0;
+
+        (rows || []).forEach(r => {
+            if (!isExtendedTargetBet(r)) return;
+            const ratio = oddsDriftRatioOf(r);
+            if (ratio === null) { excluded++; return; }
+            const a = agg.find(b => b.test(ratio));
+            if (!a) return;
+            const hit = finishOf(r) === 1;
+            const pay = hit ? oddsOf(r) * 100 : 0;
+            a.n++; if (hit) { a.hits++; a.ret += pay; }
+            const surf = surfaceOfRow(r);
+            if (a.bySurface[surf]) {
+                a.bySurface[surf].n++;
+                if (hit) { a.bySurface[surf].hits++; a.bySurface[surf].ret += pay; }
+            }
+        });
+
+        const summarize = (x) => ({
+            samples: x.n,
+            hits: x.hits,
+            recoveryRate: x.n > 0 ? (x.ret / (x.n * 100)) * 100 : 0.0
+        });
+
+        return {
+            excluded: excluded,
+            buckets: agg.map(a => Object.assign(
+                { bucket: a.bucket },
+                summarize(a),
+                { bySurface: { '芝': summarize(a.bySurface['芝']), 'ダ': summarize(a.bySurface['ダ']) } }
+            ))
+        };
+    }
+
+    // --- A-2: 芝ダ×距離帯・グレード帯成績 ---
+    function computeSurfaceDistanceAnalysis(rows) {
+        const mkAgg = () => ({ n: 0, hits: 0, ret: 0 });
+        const cells = {
+            '芝_short': mkAgg(), '芝_long': mkAgg(),
+            'ダ_short': mkAgg(), 'ダ_long': mkAgg()
+        };
+        const grades = { '重賞': mkAgg(), 'OP・L': mkAgg(), '平場': mkAgg() };
+        let excluded = 0;
+
+        (rows || []).forEach(r => {
+            if (!isExtendedTargetBet(r)) return;
+            const hit = finishOf(r) === 1;
+            const pay = hit ? oddsOf(r) * 100 : 0;
+            const add = (a) => { a.n++; if (hit) { a.hits++; a.ret += pay; } };
+
+            // グレード帯（全対象ベットが必ずどこかに入る）
+            if (isGradedRaceRow(r)) add(grades['重賞']);
+            else if (isOpenListedRaceRow(r)) add(grades['OP・L']);
+            else add(grades['平場']);
+
+            // 芝ダ×距離帯
+            const surf = surfaceOfRow(r);
+            const dist = distanceOfRow(r);
+            if ((surf !== '芝' && surf !== 'ダ') || dist <= 0) { excluded++; return; }
+            add(cells[`${surf}_${dist <= 1400 ? 'short' : 'long'}`]);
+        });
+
+        const summarize = (a) => ({
+            samples: a.n,
+            hits: a.hits,
+            recoveryRate: a.n > 0 ? (a.ret / (a.n * 100)) * 100 : 0.0
+        });
+
+        return {
+            excluded: excluded,
+            cells: [
+                Object.assign({ surface: '芝', distBand: '〜1400' }, summarize(cells['芝_short'])),
+                Object.assign({ surface: '芝', distBand: '1401〜' }, summarize(cells['芝_long'])),
+                Object.assign({ surface: 'ダ', distBand: '〜1400' }, summarize(cells['ダ_short'])),
+                Object.assign({ surface: 'ダ', distBand: '1401〜' }, summarize(cells['ダ_long']))
+            ],
+            gradeBands: ['重賞', 'OP・L', '平場'].map(g => Object.assign({ gradeBand: g }, summarize(grades[g])))
+        };
+    }
+
+    // --- A-3: 脚質（最終コーナー位置）別成績 ---
+    function computeRunningStyleAnalysis(rows) {
+        // レース頭数 = そのレースの行数（getRaceIdでグルーピング）
+        const raceSizeMap = {};
+        (rows || []).forEach(r => {
+            const id = getRaceId(r);
+            raceSizeMap[id] = (raceSizeMap[id] || 0) + 1;
+        });
+
+        const agg = {
+            '前': { n: 0, hits: 0, ret: 0 },
+            '中': { n: 0, hits: 0, ret: 0 },
+            '後': { n: 0, hits: 0, ret: 0 }
+        };
+        let excluded = 0;
+
+        (rows || []).forEach(r => {
+            if (!isExtendedTargetBet(r)) return;
+            const passage = ((r["通過順"] || "")).trim();
+            const m = passage.match(/^\d+(-\d+)*$/);
+            if (!m) { excluded++; return; }
+            const parts = passage.split('-');
+            const lastPos = parseInt(parts[parts.length - 1], 10);
+            const fieldSize = raceSizeMap[getRaceId(r)] || 0;
+            if (!lastPos || fieldSize <= 0) { excluded++; return; }
+
+            const ratio = lastPos / fieldSize;
+            const style = ratio <= 0.33 ? '前' : (ratio <= 0.66 ? '中' : '後');
+            const a = agg[style];
+            a.n++;
+            if (finishOf(r) === 1) { a.hits++; a.ret += oddsOf(r) * 100; }
+        });
+
+        return {
+            excluded: excluded,
+            styles: ['前', '中', '後'].map(s => ({
+                style: s,
+                samples: agg[s].n,
+                hits: agg[s].hits,
+                recoveryRate: agg[s].n > 0 ? (agg[s].ret / (agg[s].n * 100)) * 100 : 0.0
+            }))
+        };
+    }
+
+    // --- A-4: 馬場状態別成績 ---
+    function computeTrackConditionAnalysis(rows) {
+        const CONDS = ['良', '稍重', '重', '不良'];
+        const agg = {};
+        CONDS.forEach(c => { agg[c] = { n: 0, hits: 0, ret: 0 }; });
+        let excluded = 0;
+
+        (rows || []).forEach(r => {
+            if (!isExtendedTargetBet(r)) return;
+            const cond = ((r["馬場状態"] || "")).trim();
+            if (!agg[cond]) { excluded++; return; } // '-'や不明値は除外
+            agg[cond].n++;
+            if (finishOf(r) === 1) { agg[cond].hits++; agg[cond].ret += oddsOf(r) * 100; }
+        });
+
+        return {
+            excluded: excluded,
+            conditions: CONDS.map(c => ({
+                condition: c,
+                samples: agg[c].n,
+                hits: agg[c].hits,
+                recoveryRate: agg[c].n > 0 ? (agg[c].ret / (agg[c].n * 100)) * 100 : 0.0
+            }))
+        };
+    }
+
+    // --- B-2: 仮説登録簿の現況集計（dataFrom以降の行のみ・後知恵防止） ---
+    function computeHypothesisRegistry(rows) {
+        return HYPOTHESIS_REGISTRY.map(h => {
+            let current = null;
+            if (typeof h.compute === 'function') {
+                const scoped = (rows || []).filter(r => {
+                    const d = (r["日付"] || "").trim();
+                    return /^\d{4}-\d{2}-\d{2}/.test(d) && d >= h.dataFrom;
+                });
+                current = h.compute(scoped);
+            }
+            return {
+                id: h.id,
+                name: h.name,
+                registeredOn: h.registeredOn,
+                direction: h.direction,
+                condition: h.condition,
+                current: current
+            };
+        });
+    }
+
+    // --- 拡張分析（A-1〜A-4）のUI表示 ---
+    function renderExtendedAnalysis(rowsWithRank) {
+        const fmtRow = (n, hits, recovery) => n > 0
+            ? `<td>${n}</td><td>${hits}</td><td class="${recovery >= 100 ? 'text-green-400 font-bold' : ''}">${recovery.toFixed(1)}%</td>`
+            : `<td>0</td><td>-</td><td>-</td>`;
+        const tableWrap = (headerCells, bodyRows, note) => `
+            <div class="overflow-x-auto">
+                <table class="analysis-table w-full text-sm">
+                    <thead><tr>${headerCells.map(h => `<th>${h}</th>`).join('')}</tr></thead>
+                    <tbody>${bodyRows}</tbody>
+                </table>
+            </div>
+            ${note ? `<p class="text-xs text-slate-500 mt-2">${note}</p>` : ''}
+        `;
+        const surfCell = (s) => s.samples > 0 ? `n=${s.samples} / ${s.recoveryRate.toFixed(1)}%` : '-';
+
+        // 期間フィルタの現在値表示
+        const filterNote = document.getElementById('extendedFilterNote');
+        if (filterNote) {
+            const p = filterPeriod ? filterPeriod.value : 'all';
+            filterNote.textContent = `期間フィルタ: ${p === 'live' ? '実運用のみ' : 'すべて'} ／ 対象ベット = 実行フラグ○ × winCore6クラス（A3/B1/B2/B3/X/D1）`;
+        }
+
+        // ① オッズドリフト
+        const driftArea = document.getElementById('extendedOddsDriftArea');
+        if (driftArea) {
+            const drift = computeOddsDriftAnalysis(rowsWithRank);
+            driftArea.innerHTML = tableWrap(
+                ['区分', 'n', '的中', '回収率', '芝 (n / 回収)', 'ダ (n / 回収)'],
+                drift.buckets.map(b => `
+                    <tr>
+                        <td class="font-bold">${b.bucket}</td>
+                        ${fmtRow(b.samples, b.hits, b.recoveryRate)}
+                        <td>${surfCell(b.bySurface['芝'])}</td>
+                        <td>${surfCell(b.bySurface['ダ'])}</td>
+                    </tr>
+                `).join(''),
+                `比率 = 最終確定オッズ ÷ 購入時オッズ（どちらか欠損: ${drift.excluded}件除外）`
+            );
+        }
+
+        // ② 芝ダ×距離帯・グレード帯
+        const sdArea = document.getElementById('extendedSurfaceDistanceArea');
+        if (sdArea) {
+            const sd = computeSurfaceDistanceAnalysis(rowsWithRank);
+            const cellRows = sd.cells.map(c => `
+                <tr>
+                    <td class="font-bold">${c.surface} ${c.distBand}</td>
+                    ${fmtRow(c.samples, c.hits, c.recoveryRate)}
+                </tr>
+            `).join('');
+            const gradeRows = sd.gradeBands.map(g => `
+                <tr>
+                    <td class="font-bold">${g.gradeBand}</td>
+                    ${fmtRow(g.samples, g.hits, g.recoveryRate)}
+                </tr>
+            `).join('');
+            sdArea.innerHTML = `
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div>${tableWrap(['芝ダ×距離帯', 'n', '的中', '回収率'], cellRows, `芝ダ/距離が判別できない行: ${sd.excluded}件除外`)}</div>
+                    <div>${tableWrap(['グレード帯', 'n', '的中', '回収率'], gradeRows, '重賞=G1/G2/G3、OP・L=OPまたは単独L、平場=それ以外')}</div>
+                </div>
+            `;
+        }
+
+        // ③ 脚質（最終コーナー位置）
+        const rsArea = document.getElementById('extendedRunningStyleArea');
+        if (rsArea) {
+            const rs = computeRunningStyleAnalysis(rowsWithRank);
+            rsArea.innerHTML = tableWrap(
+                ['位置区分', 'n', '的中', '回収率'],
+                rs.styles.map(s => `
+                    <tr>
+                        <td class="font-bold">${s.style}</td>
+                        ${fmtRow(s.samples, s.hits, s.recoveryRate)}
+                    </tr>
+                `).join(''),
+                `最終コーナー位置÷レース頭数: 前(≦0.33) / 中(≦0.66) / 後(>0.66)。通過順なし: ${rs.excluded}件除外`
+            );
+        }
+
+        // ④ 馬場状態別
+        const tcArea = document.getElementById('extendedTrackConditionArea');
+        if (tcArea) {
+            const tc = computeTrackConditionAnalysis(rowsWithRank);
+            tcArea.innerHTML = tableWrap(
+                ['馬場状態', 'n', '的中', '回収率'],
+                tc.conditions.map(c => `
+                    <tr>
+                        <td class="font-bold">${c.condition}</td>
+                        ${fmtRow(c.samples, c.hits, c.recoveryRate)}
+                    </tr>
+                `).join(''),
+                `馬場状態不明('-'等): ${tc.excluded}件除外`
+            );
+        }
+    }
+
+    // --- B-2: 仮説登録簿のUI表示 ---
+    function renderHypothesisRegistry(rowsWithRank) {
+        const section = document.getElementById('hypothesisRegistrySection');
+        const area = document.getElementById('hypothesisRegistryArea');
+        if (!area) return;
+
+        const registry = computeHypothesisRegistry(rowsWithRank);
+        const dirBadge = (d) => {
+            const color = d === '削る' ? 'bg-red-900 text-red-300' : (d === '攻める' ? 'bg-green-900 text-green-300' : 'bg-slate-700 text-slate-300');
+            return `<span class="status-badge ${color} text-xs">${d}</span>`;
+        };
+        const currentCell = (c) => {
+            if (!c) return '<span class="text-slate-500">手動判定</span>';
+            if (c.n === 0) return 'n=0 / - / -';
+            return `n=${c.n} / 的中${c.hits} / <span class="${c.recovery >= 100 ? 'text-green-400 font-bold' : ''}">${c.recovery.toFixed(1)}%</span>`;
+        };
+
+        area.innerHTML = `
+            <div class="overflow-x-auto">
+                <table class="analysis-table w-full text-sm">
+                    <thead>
+                        <tr>
+                            <th>仮説</th>
+                            <th>方向</th>
+                            <th>判定条件</th>
+                            <th>現在(n・的中・回収%)</th>
+                            <th>登録日</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${registry.map(h => `
+                            <tr>
+                                <td class="font-bold">${h.name}<div class="text-xs text-slate-500 font-normal">${h.id} / 判定データ: ${HYPOTHESIS_REGISTRY.find(x => x.id === h.id).dataFrom}〜</div></td>
+                                <td>${dirBadge(h.direction)}</td>
+                                <td class="text-xs">${h.condition}</td>
+                                <td>${currentCell(h.current)}</td>
+                                <td>${h.registeredOn}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        `;
+
+        if (section) section.classList.remove('hidden');
+    }
+
     // --- 派生指標4種のUI表示 ---
     function renderDerivedMetrics(rowsWithRank) {
         const section = document.getElementById('derivedMetricsSection');
@@ -2004,7 +2474,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 marginAnalysis: computeMarginAnalysis(rowsWithRank),
                 betTimingAnalysis: computeBetTimingAnalysis(rowsWithRank),
                 favoriteStructureAnalysis: computeFavoriteStructureAnalysis(rowsWithRank),
-                equityCurveStats: computeEquityCurveStats(rowsWithRank)
+                equityCurveStats: computeEquityCurveStats(rowsWithRank),
+                // --- 期間フィルタ状態（すべて / 実運用のみ） ---
+                viewFilter: (filterPeriod && filterPeriod.value === 'live') ? 'liveOnly' : 'all',
+                // --- 拡張分析（A-1〜A-4）: 対象=実行フラグ○×winCore6クラス ---
+                oddsDriftAnalysis: computeOddsDriftAnalysis(rowsWithRank),
+                surfaceDistanceAnalysis: computeSurfaceDistanceAnalysis(rowsWithRank),
+                runningStyleAnalysis: computeRunningStyleAnalysis(rowsWithRank),
+                trackConditionAnalysis: computeTrackConditionAnalysis(rowsWithRank),
+                // --- 仮説登録簿（B-2）: 判定はdataFrom以降のデータのみ（後知恵防止） ---
+                hypothesisRegistry: computeHypothesisRegistry(rowsWithRank)
             };
 
             // --- 出力最適化: サンプル0の項目を除去 / 数値を丸め / 改行・空白を排してファイルを軽量化 ---

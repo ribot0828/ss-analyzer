@@ -60,7 +60,7 @@
                         <span class="w-8 h-8 rounded-full bg-purple-600 flex items-center justify-center text-sm">F</span>
                         解析コンテキスト・フィルター
                     </h2>
-                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
                         <div>
                             <label class="block text-xs text-slate-400 mb-1">会場</label>
                             <select id="filter-venue" class="w-full bg-slate-800 border border-slate-700 rounded p-2 text-sm text-white">
@@ -89,6 +89,13 @@
                                 <option value="mile">マイル (1500〜1800)</option>
                                 <option value="middle">中距離 (1900〜2200)</option>
                                 <option value="long">長距離 (2300〜)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs text-slate-400 mb-1">期間</label>
+                            <select id="filterPeriod" class="w-full bg-slate-800 border border-slate-700 rounded p-2 text-sm text-white">
+                                <option value="all">すべて</option>
+                                <option value="live">実運用のみ</option>
                             </select>
                         </div>
                     </div>
@@ -234,6 +241,39 @@
                         <h4 class="text-md font-bold text-slate-300 mb-3 border-b border-slate-700 pb-2">ベットタイミング（発走時刻とオッズ最終更新時刻の差）</h4>
                         <div id="derivedBetTimingArea"></div>
                     </div>
+
+                    <!-- 拡張分析（A-1〜A-4） -->
+                    <div class="mt-10 pt-6 border-t-2 border-slate-600">
+                        <h3 class="text-lg font-semibold mb-1">📈 拡張分析（ドリフト/芝ダ×距離/脚質/馬場）</h3>
+                        <p id="extendedFilterNote" class="text-xs text-slate-500 mb-6"></p>
+
+                        <div class="mb-8">
+                            <h4 class="text-md font-bold text-slate-300 mb-3 border-b border-slate-700 pb-2">オッズドリフト別（確定/購入 比率）</h4>
+                            <div id="extendedOddsDriftArea"></div>
+                        </div>
+
+                        <div class="mb-8">
+                            <h4 class="text-md font-bold text-slate-300 mb-3 border-b border-slate-700 pb-2">芝ダ×距離帯・グレード帯</h4>
+                            <div id="extendedSurfaceDistanceArea"></div>
+                        </div>
+
+                        <div class="mb-8">
+                            <h4 class="text-md font-bold text-slate-300 mb-3 border-b border-slate-700 pb-2">脚質（最終コーナー位置）別</h4>
+                            <div id="extendedRunningStyleArea"></div>
+                        </div>
+
+                        <div>
+                            <h4 class="text-md font-bold text-slate-300 mb-3 border-b border-slate-700 pb-2">馬場状態別</h4>
+                            <div id="extendedTrackConditionArea"></div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Hypothesis Registry (B-2) -->
+                <section id="hypothesisRegistrySection" class="glass-panel animate-fade hidden">
+                    <h3 class="text-lg font-semibold mb-2">🧪 仮説登録簿</h3>
+                    <p class="text-xs text-slate-400 mb-4">判定は登録簿記載の開始日以降のデータのみ（後知恵防止）。削る系は緩く(10%)・攻める系は厳しく(1%)の非対称閾値で扱う。</p>
+                    <div id="hypothesisRegistryArea"></div>
                 </section>
 
                 <!-- Odds Audit Analysis (X/D1) -->
