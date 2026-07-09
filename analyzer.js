@@ -339,6 +339,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 console.error("Odds Audit rendering error:", e);
             }
 
+            try {
+                renderDerivedMetrics(rowsWithRank);
+            } catch (e) {
+                console.error("Derived Metrics rendering error:", e);
+            }
+
             const recStats = calculateRecommendationStats(simulatedRaces);
             renderRecommendationTable(recStats);
             let amberStats = [];
@@ -1562,6 +1568,134 @@ document.addEventListener('DOMContentLoaded', () => {
             maxDrawdownUnits: maxDDU,
             maxLosingStreak: maxStreak
         };
+    }
+
+    // --- 派生指標4種のUI表示 ---
+    function renderDerivedMetrics(rowsWithRank) {
+        const section = document.getElementById('derivedMetricsSection');
+
+        // ① クラス別タイム差
+        const marginArea = document.getElementById('derivedMarginTableArea');
+        if (marginArea) {
+            const marginAnalysis = computeMarginAnalysis(rowsWithRank);
+            if (!marginAnalysis || marginAnalysis.length === 0) {
+                marginArea.innerHTML = `<p class="text-sm text-slate-400">タイムデータなし（新列対応CSVを読み込むと表示されます）</p>`;
+            } else {
+                marginArea.innerHTML = `
+                    <div class="overflow-x-auto">
+                        <table class="analysis-table w-full text-sm">
+                            <thead>
+                                <tr>
+                                    <th>クラス</th>
+                                    <th>n</th>
+                                    <th>平均タイム差(秒)</th>
+                                    <th>1.0秒以内率</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${marginAnalysis.map(m => `
+                                    <tr>
+                                        <td class="font-bold">${m.cls}</td>
+                                        <td>${m.samples}</td>
+                                        <td>${m.avgTimeDiffSec.toFixed(2)}</td>
+                                        <td>${m.within1secRate.toFixed(1)}%</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                `;
+            }
+        }
+
+        // ② 1人気の厚み別 winCore回収率
+        const favArea = document.getElementById('derivedFavoriteTableArea');
+        if (favArea) {
+            const fav = computeFavoriteStructureAnalysis(rowsWithRank);
+            favArea.innerHTML = `
+                <div class="overflow-x-auto">
+                    <table class="analysis-table w-full text-sm">
+                        <thead>
+                            <tr>
+                                <th>1人気オッズ帯</th>
+                                <th>n</th>
+                                <th>回収率</th>
+                                <th>的中率</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td class="font-bold">1人気オッズ &lt; 2.0</td>
+                                <td>${fav.fav1OddsUnder2.samples}</td>
+                                <td class="${fav.fav1OddsUnder2.recoveryRate >= 100 ? 'text-green-400 font-bold' : ''}">${fav.fav1OddsUnder2.recoveryRate.toFixed(1)}%</td>
+                                <td>${fav.fav1OddsUnder2.hitRate.toFixed(1)}%</td>
+                            </tr>
+                            <tr>
+                                <td class="font-bold">1人気オッズ ≥ 2.0</td>
+                                <td>${fav.fav1OddsOver2.samples}</td>
+                                <td class="${fav.fav1OddsOver2.recoveryRate >= 100 ? 'text-green-400 font-bold' : ''}">${fav.fav1OddsOver2.recoveryRate.toFixed(1)}%</td>
+                                <td>${fav.fav1OddsOver2.hitRate.toFixed(1)}%</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        }
+
+        // ③ エクイティ統計
+        const equityArea = document.getElementById('derivedEquityStatsArea');
+        if (equityArea) {
+            const eq = computeEquityCurveStats(rowsWithRank);
+            equityArea.innerHTML = `
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div class="glass-panel text-center p-4 border-l-4 border-l-blue-500">
+                        <div class="text-xs text-slate-400">ベット数</div>
+                        <div class="text-xl font-bold">${eq.betCount}</div>
+                    </div>
+                    <div class="glass-panel text-center p-4 border-l-4 ${eq.finalPnlUnits >= 0 ? 'border-l-green-500' : 'border-l-red-500'}">
+                        <div class="text-xs text-slate-400">最終損益(U)</div>
+                        <div class="text-xl font-bold">${eq.finalPnlUnits.toFixed(1)}U</div>
+                    </div>
+                    <div class="glass-panel text-center p-4 border-l-4 border-l-rose-400">
+                        <div class="text-xs text-slate-400">最大DD(U)</div>
+                        <div class="text-xl font-bold">${eq.maxDrawdownUnits.toFixed(1)}U</div>
+                    </div>
+                    <div class="glass-panel text-center p-4 border-l-4 border-l-amber-400">
+                        <div class="text-xs text-slate-400">最大連敗</div>
+                        <div class="text-xl font-bold">${eq.maxLosingStreak}</div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // ④ ベットタイミング
+        const timingArea = document.getElementById('derivedBetTimingArea');
+        if (timingArea) {
+            const timing = computeBetTimingAnalysis(rowsWithRank);
+            if (!timing || timing.samples === 0) {
+                timingArea.innerHTML = `<p class="text-sm text-slate-400">オッズ更新時刻データなし</p>`;
+            } else {
+                timingArea.innerHTML = `
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div class="glass-panel text-center p-4 border-l-4 border-l-cyan-400">
+                            <div class="text-xs text-slate-400">中央値</div>
+                            <div class="text-xl font-bold">${timing.medianMinutes.toFixed(1)}分</div>
+                        </div>
+                        <div class="glass-panel text-center p-4 border-l-4 border-l-slate-400">
+                            <div class="text-xs text-slate-400">p10</div>
+                            <div class="text-xl font-bold">${timing.p10Minutes.toFixed(1)}分</div>
+                        </div>
+                        <div class="glass-panel text-center p-4 border-l-4 border-l-slate-400">
+                            <div class="text-xs text-slate-400">p90</div>
+                            <div class="text-xl font-bold">${timing.p90Minutes.toFixed(1)}分</div>
+                        </div>
+                    </div>
+                    <p class="text-xs text-slate-500 mt-2">サンプル数: ${timing.samples}（除外: ${timing.excludedCount}）</p>
+                `;
+            }
+        }
+
+        if (section) section.classList.remove('hidden');
     }
 
     // --- JSONエクスポート処理 ---

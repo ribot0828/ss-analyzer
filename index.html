@@ -210,6 +210,32 @@
                     <div id="analysisResultArea"></div>
                 </section>
 
+                <!-- Derived Metrics (Margin / Bet Timing / Favorite Structure / Equity) -->
+                <section id="derivedMetricsSection" class="glass-panel animate-fade hidden">
+                    <h3 class="text-lg font-semibold mb-6">📏 タイム差・新指標分析</h3>
+
+                    <div class="mb-8">
+                        <h4 class="text-md font-bold text-slate-300 mb-3 border-b border-slate-700 pb-2">クラス別タイム差</h4>
+                        <div id="derivedMarginTableArea"></div>
+                    </div>
+
+                    <div class="mb-8">
+                        <h4 class="text-md font-bold text-slate-300 mb-3 border-b border-slate-700 pb-2">1人気の厚み別 winCore回収率</h4>
+                        <div id="derivedFavoriteTableArea"></div>
+                    </div>
+
+                    <div class="mb-8">
+                        <h4 class="text-md font-bold text-slate-300 mb-3 border-b border-slate-700 pb-2">エクイティ統計</h4>
+                        <p class="text-xs text-slate-500 mb-2">※実行フラグ○×winCore6クラス基準の単勝ベットのみ集計</p>
+                        <div id="derivedEquityStatsArea"></div>
+                    </div>
+
+                    <div>
+                        <h4 class="text-md font-bold text-slate-300 mb-3 border-b border-slate-700 pb-2">ベットタイミング（発走時刻とオッズ最終更新時刻の差）</h4>
+                        <div id="derivedBetTimingArea"></div>
+                    </div>
+                </section>
+
                 <!-- Odds Audit Analysis (X/D1) -->
                 <section class="glass-panel animate-fade">
                     <h3 class="text-lg font-semibold mb-6">🔎 X/D1クラス オッズ帯別 近走監査有効性クロス分析</h3>
