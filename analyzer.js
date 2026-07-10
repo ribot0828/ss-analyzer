@@ -282,10 +282,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 払戻パース: '1090円'→{pay:1090,key:null} / '12: 6,700円'→{pay:6700,key:"12"} / '1-3-5: 5930円'→{pay:5930,key:"1-3-5"}
     // ※2026-06-06以降のCSVは「馬番(or組): 金額円」形式。parseFloatだと先頭数字を誤読するため専用パーサで処理。
+    // ※同着時はエンジンが '3: 190円 / 13: 340円' と複数組を'/'連結するため、先頭の組のみ採用する
+    //   （'/'以降まで数字連結すると金額が桁違いに壊れる）
     function parseColonPayout(raw) {
         if (raw == null) return { pay: 0, key: null };
-        const s = String(raw).trim();
+        let s = String(raw).trim();
         if (!s || s === '-') return { pay: 0, key: null };
+        if (s.includes('/')) s = s.split('/')[0].trim();
         if (s.includes(':') || s.includes('：')) {
             const parts = s.split(/[:：]/);
             const key = (parts[0] || '').replace(/[^0-9-]/g, '');
