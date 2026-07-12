@@ -2344,6 +2344,88 @@ document.addEventListener('DOMContentLoaded', () => {
         `;
     }
 
+    // --- 推奨度別成績(recommendationPerformance)組み立て: recStatsからJSON出力用オブジェクトを生成 ---
+    function buildRecommendationPerformance(recStats) {
+        const recommendationPerformance = {
+            "SSS": { sampleRaces: 0, hitRate: 0.0, recoveryRate: 0.0 },
+            "SS": { sampleRaces: 0, hitRate: 0.0, recoveryRate: 0.0 },
+            "S": { sampleRaces: 0, hitRate: 0.0, recoveryRate: 0.0 },
+            "Low": { sampleRaces: 0, hitRate: 0.0, recoveryRate: 0.0 }
+        };
+
+        if (recStats && Array.isArray(recStats)) {
+            recStats.forEach(rs => {
+                const rec = rs?.rec;
+                if (rec && recommendationPerformance[rec]) {
+                    recommendationPerformance[rec] = {
+                        sampleRaces: rs?.raceCount || 0,
+                        hitRate: rs?.totalBetRaces > 0 ? (rs.totalHits / rs.totalBetRaces) * 100 : 0.0,
+                        recoveryRate: rs?.totalROI || 0.0,
+                        winRecoveryRate: rs?.winROI || 0.0,
+                        wideRecoveryRate: 0.0,
+                        trifectaRecoveryRate: rs?.trioROI || 0.0,
+                        winHitRate: rs?.winBetRaces > 0 ? (rs.winHits / rs.winBetRaces) * 100 : 0.0,
+                        winRateCI95: rs?.winRateCI95 ? { lo: rs.winRateCI95.lo * 100, hi: rs.winRateCI95.hi * 100 } : null,
+                        wideHitRate: 0.0,
+                        trifectaHitRate: rs?.trioBetRaces > 0 ? (rs.trioHits / rs.trioBetRaces) * 100 : 0.0,
+                        refTrifectaRecoveryRate: rs?.refTrioROI || 0.0,
+                        refTrifectaHitRate: rs?.refTrioBetRaces > 0 ? (rs.refTrioHits / rs.refTrioBetRaces) * 100 : 0.0,
+                        refTrifectaInvest: rs?.refTrioInvest || 0
+                    };
+                }
+            });
+        }
+
+        return recommendationPerformance;
+    }
+
+    // --- 実運用のみビュー: 期間フィルタに関係なく、実行フラグ記録レースだけで再計算した意思決定用の要約 ---
+    function computeLiveOnlyView(rowsWithRank) {
+        try {
+            const liveIds = buildLiveRaceIdSet();
+            const liveRows = (rowsWithRank || []).filter(r => liveIds.has(getRaceId(r)));
+            if (liveRows.length === 0) return null;
+            const raceMap = {};
+            liveRows.forEach(r => {
+                const id = getRaceId(r);
+                if (!raceMap[id]) raceMap[id] = [];
+                raceMap[id].push(r);
+            });
+            const sim = Object.keys(raceMap).map(id => simulateRace(raceMap[id], id));
+            const risk = calculateRiskMetrics(sim);
+            const recStats = calculateRecommendationStats(sim);
+            const classStats = calculateClassStats(liveRows);
+            let smallBank = null;
+            try { smallBank = computeSmallBankSimulation(sim); } catch (e) { console.error('liveOnlyView smallBank error:', e); }
+            return {
+                note: '実運用レース（実行フラグ記録）のみで再計算した要約。意思決定はこちらを正とする',
+                summary: {
+                    totalRaces: sim.length,
+                    overallWinRecoveryRate: risk?.overallWinRecoveryRate || 0,
+                    maxDrawdownUnits: risk?.maxDrawdownUnits || 0,
+                    sharpeRatio: risk?.sharpeRatio || 0,
+                    maxWinLosingStreak: risk?.maxWinLosingStreak || 0,
+                    winRoiBootstrapCI95: risk?.winRoiBootstrapCI95 || null,
+                    timeSplitStability: risk?.timeSplitStability || null
+                },
+                recommendationPerformance: buildRecommendationPerformance(recStats),
+                classPerformance: (classStats || []).map(c => ({
+                    cls: c?.cls || "",
+                    sampleSize: c?.sample || 0,
+                    winRate: c?.winRate || 0.0,
+                    winRateCI95: c?.winRateCI95 ? { lo: c.winRateCI95.lo * 100, hi: c.winRateCI95.hi * 100 } : null,
+                    rentaiRate: c?.top2Rate || 0.0,
+                    placeRate: c?.top3Rate || 0.0,
+                    winRecoveryRate: c?.roi || 0.0
+                })),
+                smallBankSimulation: smallBank
+            };
+        } catch (e) {
+            console.error('computeLiveOnlyView error:', e);
+            return null;
+        }
+    }
+
     // --- JSONエクスポート処理 ---
     function generateAndDownloadJSON() {
         if (!window.latestSimData) {
@@ -2357,35 +2439,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const overallRoi = parseFloat(document.getElementById('stat-overall-roi')?.textContent || '0') || 0;
 
             // 推奨度別成績
-            const recommendationPerformance = {
-                "SSS": { sampleRaces: 0, hitRate: 0.0, recoveryRate: 0.0 },
-                "SS": { sampleRaces: 0, hitRate: 0.0, recoveryRate: 0.0 },
-                "S": { sampleRaces: 0, hitRate: 0.0, recoveryRate: 0.0 },
-                "Low": { sampleRaces: 0, hitRate: 0.0, recoveryRate: 0.0 }
-            };
-            
-            if (recStats && Array.isArray(recStats)) {
-                recStats.forEach(rs => {
-                    const rec = rs?.rec;
-                    if (rec && recommendationPerformance[rec]) {
-                        recommendationPerformance[rec] = {
-                            sampleRaces: rs?.raceCount || 0,
-                            hitRate: rs?.totalBetRaces > 0 ? (rs.totalHits / rs.totalBetRaces) * 100 : 0.0,
-                            recoveryRate: rs?.totalROI || 0.0,
-                            winRecoveryRate: rs?.winROI || 0.0,
-                            wideRecoveryRate: 0.0,
-                            trifectaRecoveryRate: rs?.trioROI || 0.0,
-                            winHitRate: rs?.winBetRaces > 0 ? (rs.winHits / rs.winBetRaces) * 100 : 0.0,
-                            winRateCI95: rs?.winRateCI95 ? { lo: rs.winRateCI95.lo * 100, hi: rs.winRateCI95.hi * 100 } : null,
-                            wideHitRate: 0.0,
-                            trifectaHitRate: rs?.trioBetRaces > 0 ? (rs.trioHits / rs.trioBetRaces) * 100 : 0.0,
-                            refTrifectaRecoveryRate: rs?.refTrioROI || 0.0,
-                            refTrifectaHitRate: rs?.refTrioBetRaces > 0 ? (rs.refTrioHits / rs.refTrioBetRaces) * 100 : 0.0,
-                            refTrifectaInvest: rs?.refTrioInvest || 0
-                        };
-                    }
-                });
-            }
+            const recommendationPerformance = buildRecommendationPerformance(recStats);
 
             // SS密度別成績
             const densityPerformance = {
@@ -2661,7 +2715,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 // --- 仮説登録簿（B-2）: 判定はdataFrom以降のデータのみ（後知恵防止） ---
                 hypothesisRegistry: computeHypothesisRegistry(rowsWithRank),
                 // --- 小資金モード(R3)シミュレーション: 現行フル配分との比較（2026-07-09導入） ---
-                smallBankSimulation: smallBankSim || null
+                smallBankSimulation: smallBankSim || null,
+                // --- 実運用のみビュー: viewFilterに関係なく常時併記（意思決定の正）。フィルタが実運用のみの時は本体と同一のためnull ---
+                liveOnlyView: (filterPeriod && filterPeriod.value === 'live') ? null : computeLiveOnlyView(rowsWithRank)
             };
 
             // --- 出力最適化: サンプル0の項目を除去 / 数値を丸め / 改行・空白を排してファイルを軽量化 ---
@@ -3758,6 +3814,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
 あなたは競馬投資モデル「SS-Engine」の定量アナリストです。上の現行仕様と実績データ、および添付JSON（ss_feedback_data.json: summary / evaluationPerformance / recommendationPerformance / densityPerformance / amberAudit / oddsBinAnalysis / classPerformance / evCalibration）に基づき、パラメータ改善案を提案してください。あなたの提案は次段階で別のAIが厳格に検証します。根拠の数値とサンプル数が無い提案はすべて却下されます。
 
+【データの正】viewFilter が 'all' のJSONには紙上シミュレーション期間の上振れが混入している。JSON内に liveOnlyView があれば、回収率・クラス別成績・R3成績の判断は liveOnlyView を正とし、全期間値は参考としてのみ扱うこと。全期間値のみを根拠にした増額・緩和系の提案は禁止。
+
 ### 手順（この順で実行）
 1. 【最優先・H2】evCalibration.winCore.slope を確認し、値と判定を回答の最初に宣言する（0.85〜1.15なら較正OK。範囲外なら、個別パラメータの調整より先に EV計算式＝スコア配点・予想勝率算出の補正を提案の第1候補にする。all は N等を含む参考値）。
 2. クラス別・推奨度別・EV帯別・オッズ帯別の表から、回収率が明確に高い／低いセグメントを特定する。必ずサンプル数 n を併記する。表に95%信頼区間（CI）がある場合は必ず考慮し、CIが100%を跨ぐ回収率・区間が広すぎる的中率を根拠の中心にしない。
@@ -3791,6 +3849,8 @@ document.addEventListener('DOMContentLoaded', () => {
 ## 🟧 あなたの役割: 改善案の検証者・統合者（ステップ②→③）
 
 あなたは競馬投資モデル「SS-Engine」の保守的なリスク管理者です。上の現行仕様・実績データ（添付のレース別データJSONがあればそれも）と、このメッセージ末尾に貼り付けられたGeminiの提案リストを査定してください。あなたの仕事は良い提案を通すことではなく、悪い変更からモデルを守ることです。提案の全件採用は検証の失敗とみなします。データが変更を強く支持しない限り「現状維持」が正解です。
+
+【データの正】viewFilter が 'all' のJSONには紙上シミュレーション期間の上振れが混入している。JSON内に liveOnlyView があれば、回収率・クラス別成績・R3成績の判断は liveOnlyView を正とし、全期間値は参考としてのみ扱うこと。全期間値のみを根拠にした増額・緩和系の提案は禁止。
 
 【ステップ②: 検証】各提案を個別に査定する。
 判定軸:
