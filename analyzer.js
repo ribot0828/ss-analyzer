@@ -85,12 +85,12 @@ document.addEventListener('DOMContentLoaded', () => {
         },
         {
             id: 'h2', name: 'X撤退条件', registeredOn: '2026-07-08', dataFrom: '2026-07-08', direction: '削る',
-            condition: '実運用X: n≧50で的中0なら購入停止',
+            condition: '実運用X: n≧50で的中0なら購入停止 → 2026-07-12実施(実運用0/67)',
             compute: rows => hypoStat(rows.filter(r => isExecutedBet(r) && clsOf(r) === 'X'))
         },
         {
             id: 'h3', name: 'SSS三連複SKIP', registeredOn: '2026-07-05', dataFrom: '2026-06-20', direction: '削る',
-            condition: '軸1頭ながし方式のみでSSS n≧50・回収<100%継続なら再審議',
+            condition: '軸1頭ながし方式のみでSSS n≧50・回収<100%継続なら再審議 → 2026-07-12 SSSスキップ実施',
             compute: null // 手動判定（三連複の方式別集計は自動化対象外）
         },
         {
@@ -100,12 +100,12 @@ document.addEventListener('DOMContentLoaded', () => {
         },
         {
             id: 'h5', name: 'ダ1401m+縮小', registeredOn: '2026-07-08', dataFrom: '2026-07-08', direction: '削る',
-            condition: '実運用winCoreダ1401m+: 回収<100%継続で半サイズ→除外検討',
+            condition: '実運用winCoreダ1401m+: 回収<100%継続で半サイズ→除外検討 → 2026-07-12 半サイズ実施',
             compute: rows => hypoStat(rows.filter(r => isExecutedBet(r) && MARGIN_WINCORE_CLASSES.includes(clsOf(r)) && surfaceOfRow(r) === 'ダ' && distanceOfRow(r) >= 1401))
         },
         {
             id: 'h6', name: '重賞winCore除外', registeredOn: '2026-07-08', dataFrom: '2026-07-08', direction: '削る',
-            condition: '実運用winCore重賞: 累積n≧80・回収<100%で除外',
+            condition: '実運用winCore重賞: 累積n≧80・回収<100%で除外 → 2026-07-12 半サイズ実施',
             compute: rows => hypoStat(rows.filter(r => isExecutedBet(r) && MARGIN_WINCORE_CLASSES.includes(clsOf(r)) && isGradedRaceRow(r)))
         },
         {
@@ -121,6 +121,11 @@ document.addEventListener('DOMContentLoaded', () => {
             id: 'h8', name: '100倍超帯', registeredOn: '2026-07-08', dataFrom: '2026-07-08', direction: '観察',
             condition: '実運用winCore購入時100倍以上: X撤退条件とセットで観察',
             compute: rows => hypoStat(rows.filter(r => isExecutedBet(r) && MARGIN_WINCORE_CLASSES.includes(clsOf(r)) && buyOddsOf(r) >= 100.0))
+        },
+        {
+            id: 'h9', name: 'B2 EV1.5帯監視', registeredOn: '2026-07-12', dataFrom: '2026-07-12', direction: '削る',
+            condition: 'B2 EV1.5〜1.59帯: 登録日以降n≧100・回収率<100%継続でB2下限を1.600に引上げ',
+            compute: rows => hypoStat(rows.filter(r => isExecutedBet(r) && clsOf(r) === 'B2' && evOf(r) >= 1.5 && evOf(r) < 1.6))
         }
     ];
 
@@ -447,9 +452,15 @@ document.addEventListener('DOMContentLoaded', () => {
             drawEquityCurve(simulatedRaces);
 
             let smallBankSim = null;
+            let liveSmallBankSim = null;
             try {
                 smallBankSim = computeSmallBankSimulation(simulatedRaces);
-                renderSmallBankSimulation(smallBankSim);
+                const liveIds = buildLiveRaceIdSet();
+                const liveSimRaces = simulatedRaces.filter(r => r.horses && r.horses[0] && liveIds.has(getRaceId(r.horses[0])));
+                if (liveSimRaces.length > 0) {
+                    liveSmallBankSim = computeSmallBankSimulation(liveSimRaces);
+                }
+                renderSmallBankSimulation(smallBankSim, liveSmallBankSim);
             } catch (e) {
                 console.error("Small Bank Simulation rendering error:", e);
             }
@@ -490,7 +501,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    const WIN_CORE_CLASSES = ['A3', 'B2', 'A2', 'B1', 'D1', 'B3', 'X'];
+    const WIN_CORE_CLASSES = ['A3', 'B2', 'A2', 'B1', 'D1', 'B3'];
     const PLACE_CORE_CLASSES_FULL = ['S0', 'S1', 'S2', 'A0', 'B0+', 'A1', 'B0'];
     const AXIS_CLASSES = ['S0', 'S1', 'S2', 'A0', 'B0+', 'A1', 'B0'];
 
@@ -506,7 +517,6 @@ document.addEventListener('DOMContentLoaded', () => {
             else if (rating === 'A' && ev < 0.600) cls = 'A0';
             else if (rating === 'B' && ev > 0.500 && ev <= 0.900) cls = 'B0';
             else if (rating === 'A' && ev >= 0.600 && ev <= 0.899) cls = 'A1';
-            else if (rating === 'D' && ev >= 3.000 && ev <= 3.999) cls = 'X';
             else if (rating === 'B' && ev >= 1.500 && ev <= 1.699) cls = 'B2';
             else if (rating === 'B' && ev >= 1.100 && ev <= 1.350) cls = 'B1';
             else if (rating === 'B' && ev >= 2.000 && ev <= 4.500) cls = 'B3';
@@ -613,17 +623,17 @@ document.addEventListener('DOMContentLoaded', () => {
         
         // 優先順位の定数定義（念のため関数内に明記）
         const PLACE_CORE_CLASSES = ['S0', 'S1', 'S2', 'A0', 'B0+', 'A1', 'B0'];
-        const WIN_CORE_CLASSES = ['A3', 'B2', 'A2', 'D1', 'B1', 'B3', 'X'];
-        const WIN_PRIORITY_LOCAL = ['A3', 'B2', 'A2', 'D1', 'B1', 'B3', 'X']; // [10] D1>B1
+        const WIN_CORE_CLASSES = ['A3', 'B2', 'A2', 'D1', 'B1', 'B3'];
+        const WIN_PRIORITY_LOCAL = ['A3', 'B2', 'A2', 'D1', 'B1', 'B3']; // [10] D1>B1
         const TRIO_ROW2_DEFENSE_LOCAL = ['S0', 'S1', 'S2', 'A0', 'B0+', 'A1', 'B0'];
-        const TRIO_ROW2_ATTACK_LOCAL = ['A3', 'B2', 'A2', 'D1', 'B1', 'B3', 'X']; // [10] D1>B1
+        const TRIO_ROW2_ATTACK_LOCAL = ['A3', 'B2', 'A2', 'D1', 'B1', 'B3']; // [10] D1>B1
 
         const hasAxis = classes.some(c => PLACE_CORE_CLASSES.includes(c));
         const isGraded = raceHorses[0] && ((raceHorses[0]["グレード・頭数"] || "").includes("G") || (raceHorses[0]["グレード・頭数"] || "").includes("重賞"));
         const minDensity = isGraded ? 0.100 : 0.150;
         const rec = determineRecommendation(raceHorses);
         const baseSkipTrio = !hasAxis || density < minDensity;
-        const skipTrio = baseSkipTrio || rec === 'S' || rec === 'Low';
+        const skipTrio = baseSkipTrio || rec === 'SSS' || rec === 'S' || rec === 'Low';
 
         // 【攻撃ソート関数】EV差が0.100以内なら馬番が小さい方（内枠）を優先、それ以外はEV低を優先
         const attackSort = (a, b) => {
@@ -789,13 +799,18 @@ document.addEventListener('DOMContentLoaded', () => {
             'A2': { SSS: 2, SS: 2, S: 2, Low: 0 },
             'B1': { SSS: 1, SS: 1, S: 1, Low: 0 }, // [8] 全推奨度1U (Low=0)
             'D1': { SSS: 1, SS: 1, S: 1, Low: 0 },
-            'B3': { SSS: 1, SS: 1, S: 1, Low: 0 },
-            'X':  { SSS: 1, SS: 1, S: 1, Low: 0 }
+            'B3': { SSS: 1, SS: 1, S: 1, Low: 0 }
         };
         const getUnits = (cls) => {
             if (rec === 'Low') return 0;
-            const entry = UNIT_TABLE[cls] && UNIT_TABLE[cls][rec];
-            return entry !== undefined ? entry : 1;
+            let base = UNIT_TABLE[cls] && UNIT_TABLE[cls][rec];
+            if (base === undefined) base = 1;
+            if (base === 0) return 0;
+            // 2026-07-12: ダ1401m+・重賞はユニット半減（最低1U維持）h5/h6
+            if (isGraded || (surfaceOfRow(raceHorses[0]) === 'ダ' && distanceOfRow(raceHorses[0]) >= 1401)) {
+                return Math.max(1, Math.floor(base / 2));
+            }
+            return base;
         };
 
         finalWinBets.forEach(h => {
@@ -1561,7 +1576,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- 派生指標（新規CSV列ベース）: winCoreクラス定義 & 実行フラグ判定 ---
     // ※既存の calibration/simulateRace 用 WIN_CORE_CLASSES（A2含む7クラス）とは別に、
     //   今回の派生指標の集計仕様として指定された6クラスをここで定義する。
-    const MARGIN_WINCORE_CLASSES = ['A3', 'B1', 'B2', 'B3', 'X', 'D1'];
+    const MARGIN_WINCORE_CLASSES = ['A3', 'B1', 'B2', 'B3', 'D1'];
     const isExecutedBet = r => {
         const v = (r && r["実行フラグ"] || "").trim();
         return v === '○' || v === '〇';
@@ -2294,7 +2309,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- 小資金モード(R3)シミュレーション UI表示 ---
-    function renderSmallBankSimulation(sim) {
+    function renderSmallBankSimulation(sim, liveSim) {
         const area = document.getElementById('derivedSmallBankSimArea');
         if (!area) return;
         if (!sim) {
@@ -2332,14 +2347,16 @@ document.addEventListener('DOMContentLoaded', () => {
                         </tr>
                     </thead>
                     <tbody>
-                        ${row('現行フル', full)}
-                        ${row('R3(小資金)', sim)}
+                        ${row('現行フル(全期間)', full)}
+                        ${row('R3(全期間)', sim)}
+                        ${liveSim ? row('現行フル(実運用)', liveSim.fullAllocation || {}) : ''}
+                        ${liveSim ? row('R3(実運用)', liveSim) : ''}
                     </tbody>
                 </table>
             </div>
             <p class="text-xs text-slate-500 mt-2">
                 ※R3＝各レースの単勝優先最上位1点に3U固定（残高2万円未満時の採用ルール・2026-07-09）。資金残高の推移は考慮しないフラット計測。
-                買い目なし（ノーベット）: 現行フル ${full.skippedRaces ?? 0}レース / R3 ${sim.skippedRaces ?? 0}レース
+                買い目なし（ノーベット）: 現行フル ${full.skippedRaces ?? 0}レース / R3 ${sim.skippedRaces ?? 0}レース。${liveSim ? ` 実運用のみ: 現行フル ${(liveSim.fullAllocation || {}).skippedRaces ?? 0}レース / R3 ${liveSim.skippedRaces ?? 0}レース` : ''}
             </p>
         `;
     }
@@ -2480,10 +2497,10 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
             // オッズ帯別分析 (X/D1)
-            const oddsBinAnalysis = { "D1": [], "X": [] };
+            const oddsBinAnalysis = { "D1": [] };
             const bins = ODDS_BINS;
 
-            ['D1', 'X'].forEach(cls => {
+            ['D1'].forEach(cls => {
                 const clsRows = (rowsWithRank || []).filter(r => clsOf(r) === cls);
                 bins.forEach(b => {
                     let okCount = 0, okInvest = 0, okReturn = 0, okHits = 0;
