@@ -514,6 +514,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 console.error('liveOnly dashboard tile error:', e);
             }
 
+            // 2026-07-19: EV較正シャドーを解析時にも計算しUIパネル表示（本番集計は不変）
+            try {
+                const shadowRaceMap = {};
+                (rowsWithRank || []).forEach(r => {
+                    const id = getRaceId(r);
+                    if (!shadowRaceMap[id]) shadowRaceMap[id] = [];
+                    shadowRaceMap[id].push(r);
+                });
+                window.latestEvShadow = computeEvShadow(shadowRaceMap, buildLiveRaceIdSet());
+                renderEvShadowPanel(window.latestEvShadow, window.latestLiveOnlyView, riskStats);
+            } catch (e) {
+                console.error('evShadow panel error:', e);
+            }
+
             const outliers = detectOutliers(rowsWithRank);
 
             const aiPrompts = generateUltimateMarkdown(riskStats, classStats, recStats, outliers, simulatedRaces);
@@ -1019,6 +1033,57 @@ document.addEventListener('DOMContentLoaded', () => {
             allPeriod: aggregate(shadowRaces),
             liveOnly: aggregate(liveShadowRaces)
         };
+    }
+
+    // --- EV較正シャドー UIパネル（2026-07-19） ---
+    function renderEvShadowPanel(shadow, lov, riskStats) {
+        const area = document.getElementById('evShadowArea');
+        if (!area) return;
+        if (!shadow) {
+            area.innerHTML = `<p class="text-sm text-slate-400">シャドー計算エラー（コンソール参照）</p>`;
+            return;
+        }
+        const fmt = (v, d = 1) => (v === null || v === undefined || !isFinite(v)) ? '-' : v.toFixed(d);
+        const curAllRoi = riskStats ? riskStats.overallWinRecoveryRate : null;
+        const curLiveRoi = (lov && lov.summary) ? lov.summary.overallWinRecoveryRate : null;
+        const liveDiff = (curLiveRoi !== null && shadow.liveOnly) ? shadow.liveOnly.recoveryRate - curLiveRoi : null;
+        const roiCell = (v) => `<td class="${(v ?? 0) >= 100 ? 'text-green-400 font-bold' : 'text-red-400'}">${fmt(v)}%</td>`;
+        const row = (label, s, curRoi) => `
+            <tr>
+                <td class="font-bold">${label}</td>
+                <td>${s ? s.betCount : '-'}</td>
+                <td>${s ? Math.round(s.invest).toLocaleString() + '円' : '-'}</td>
+                <td>${s ? Math.round(s.payout).toLocaleString() + '円' : '-'}</td>
+                ${roiCell(s ? s.recoveryRate : null)}
+                <td>${s ? fmt(s.hitRate) + '%' : '-'}</td>
+                ${roiCell(curRoi)}
+            </tr>`;
+        const clsRows = ((shadow.liveOnly && shadow.liveOnly.classPerformance) || [])
+            .slice().sort((a, b) => b.n - a.n)
+            .map(c => `<tr><td>${c.cls}</td><td>${c.n}</td><td>${c.hits}</td>${roiCell(c.recoveryRate)}</tr>`).join('');
+        area.innerHTML = `
+            <div class="overflow-x-auto">
+                <table class="analysis-table w-full text-sm">
+                    <thead><tr><th>シャドー成績</th><th>ベット数</th><th>投資</th><th>払戻</th><th>単勝回収率</th><th>的中率</th><th>（参考）現行回収率</th></tr></thead>
+                    <tbody>
+                        ${row('全期間', shadow.allPeriod, curAllRoi)}
+                        ${row('実運用（判定対象）', shadow.liveOnly, curLiveRoi)}
+                    </tbody>
+                </table>
+            </div>
+            <p class="text-sm mt-2 ${liveDiff !== null && liveDiff > 0 ? 'text-green-400' : 'text-slate-300'}">
+                実運用でのシャドー vs 現行: <span class="font-bold">${liveDiff !== null ? (liveDiff >= 0 ? '+' : '') + fmt(liveDiff) + 'pt' : '-'}</span>
+                （シャドー ${shadow.liveOnly ? fmt(shadow.liveOnly.recoveryRate) : '-'}% / 現行 ${fmt(curLiveRoi)}%）
+            </p>
+            <details class="mt-3">
+                <summary class="text-sm text-slate-400 cursor-pointer">シャドー実運用のクラス別内訳（n順）</summary>
+                <div class="overflow-x-auto mt-2">
+                    <table class="analysis-table w-full text-sm">
+                        <thead><tr><th>クラス</th><th>n</th><th>的中</th><th>回収率</th></tr></thead>
+                        <tbody>${clsRows || ''}</tbody>
+                    </table>
+                </div>
+            </details>`;
     }
 
     // --- 小資金モード(R3)シミュレーション ---
