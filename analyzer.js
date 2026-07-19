@@ -156,6 +156,11 @@ document.addEventListener('DOMContentLoaded', () => {
             id: 'h15', name: 'R3推奨度連動ステーク', registeredOn: '2026-07-19', dataFrom: '2026-07-19', direction: '削る',
             condition: '2026-07-19切替(SS=3U・SSS/S=1U)。S推奨: 登録日以降live n≧150で単勝回収≧100%なら一律3U復帰を審議／SSS側はh11(n≧60でSSS>SS)と連動',
             compute: null // 手動判定（recommendationPerformance.S / SSS を参照）
+        },
+        {
+            id: 'h16', name: 'A2監視', registeredOn: '2026-07-19', dataFrom: '2026-07-19', direction: '削る',
+            condition: 'A2はlive回収79.1%(n=64)＋確定オッズ下落層の疑い(h7関連)。EV較正判定後、登録日以降live n≧150・単勝回収<90%でB1保留案件とセットで降格審議',
+            compute: rows => hypoStat(rows.filter(r => isExecutedBet(r) && clsOf(r) === 'A2'))
         }
     ];
 
