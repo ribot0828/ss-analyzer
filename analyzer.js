@@ -80,7 +80,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const HYPOTHESIS_REGISTRY = [
         {
             id: 'h1', name: 'D1 MAO撤退監視', registeredOn: '2026-07-05', dataFrom: '2026-07-05', direction: '削る',
-            condition: 'D1の購入時オッズ40.0〜49.9倍帯: 累積n≧60・的中≧2・回収>100%でMAO係数1.00へ戻す',
+            condition: 'D1の購入時オッズ40.0〜49.9倍帯: 累積n≧60・的中≧2・回収>100%でMAO係数を一段戻す(1.70→1.50)',
             compute: rows => hypoStat(rows.filter(r => isExecutedBet(r) && clsOf(r) === 'D1' && buyOddsOf(r) >= 40.0 && buyOddsOf(r) < 50.0))
         },
         {
@@ -126,6 +126,26 @@ document.addEventListener('DOMContentLoaded', () => {
             id: 'h9', name: 'B2 EV1.5帯監視', registeredOn: '2026-07-12', dataFrom: '2026-07-12', direction: '削る',
             condition: 'B2 EV1.5〜1.59帯: 登録日以降n≧100・回収率<100%継続でB2下限を1.600に引上げ',
             compute: rows => hypoStat(rows.filter(r => isExecutedBet(r) && clsOf(r) === 'B2' && evOf(r) >= 1.5 && evOf(r) < 1.6))
+        },
+        {
+            id: 'h10', name: 'S三連複再開監視', registeredOn: '2026-07-19', dataFrom: '2026-07-19', direction: '観察',
+            condition: 'S推奨のrefTrifecta: n≧100・回収≧110%で執行再開を審議（現在SSのみ執行）',
+            compute: null // 手動判定（recommendationPerformance.S.refTrifecta を参照）
+        },
+        {
+            id: 'h11', name: 'SSS配分復帰監視', registeredOn: '2026-07-19', dataFrom: '2026-07-19', direction: '観察',
+            condition: 'live SSS: 登録日以降n≧60でSSS単勝回収がSSを上回れば専用配分(A3=6,B2=3)復活',
+            compute: null // 手動判定（レース単位recのためrows単位computeは不適）
+        },
+        {
+            id: 'h12', name: 'D1 MAO1.70監視', registeredOn: '2026-07-19', dataFrom: '2026-07-19', direction: '削る',
+            condition: '2026-07-19引上げ(1.50→1.70)後: n≧60・的中≧2・回収>100%で1.50へ戻す',
+            compute: rows => hypoStat(rows.filter(r => isExecutedBet(r) && clsOf(r) === 'D1'))
+        },
+        {
+            id: 'h13', name: '後半ROI減衰監視', registeredOn: '2026-07-19', dataFrom: '2026-07-19', direction: '観察',
+            condition: 'liveOnlyView.timeSplitStability: 後半ROI<100%が次回サイクルも継続なら全体ユニット縮小を審議',
+            compute: null // 手動判定（timeSplitStabilityを参照）
         }
     ];
 
@@ -530,7 +550,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (['S0','S1','S2','A0','B0+','A1','B0'].includes(cls)) mao = 0.60 / winRate; // Ver.5.3: 防御系係数 0.50→0.60
             else if (['B1', 'B2', 'B3', 'A2', 'A3'].includes(cls)) mao = 0.90 / winRate;
             else if (cls === 'X') mao = 3.00 / winRate;
-            else if (cls === 'D1') mao = 1.50 / winRate; // 2026-07-05: D1係数 1.00→1.50（rankCalibration D比0.666による較正）
+            else if (cls === 'D1') mao = 1.70 / winRate; // 2026-07-19: D1係数 1.50→1.70（live n=145・的中2・回収76.2%。※2.00はEV帯上限1.799との関係で全滅=事実上の完全除外となるため1.70。h12撤退条件あり）
         }
 
         let amberPass = false;
@@ -543,7 +563,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return { cls, mao, amberPass };
     }
 
-    function enrichHorses(horses) {
+    function enrichHorses(horses, evTransform = null) {
         let totalScore = 0;
 
         // 1. スコア付与と合計計算（判定は購入時オッズ基準）
@@ -572,13 +592,19 @@ document.addEventListener('DOMContentLoaded', () => {
             h.calculatedEv = Math.floor(rawEv * 1000 + 1e-9) / 1000;
 
             const r = ratingOf(h);
-            const winRate = h.expectedWinRate;
-            const { cls, amberPass } = classifyHorse(r, h.usedOdds, winRate, h.calculatedEv);
+            let winRate = h.expectedWinRate;
+            let evForClass = h.calculatedEv;
+            if (evTransform) {
+                const transformed = evTransform({ winRate, ev: evForClass, odds: h.usedOdds });
+                winRate = transformed.winRate;
+                evForClass = transformed.ev;
+            }
+            const { cls, amberPass } = classifyHorse(r, h.usedOdds, winRate, evForClass);
 
             h.amberPass = amberPass;
-            // simulateRace 等が参照する購入時ベースの判定値（正）
+            // simulateRace 等が参照する購入時ベースの判定値（正）。evTransform適用時はシャドー値。
             h["購入時クラス"] = cls;
-            h["購入時期待値"] = h.calculatedEv;
+            h["購入時期待値"] = evForClass;
 
             // 確定オッズでの参照値（表示・参考用。購入時値が欠損した場合のみ購入時値を流用）
             const finalOdds = parseFloat(h["最終確定オッズ"]) || h.usedOdds;
@@ -616,8 +642,68 @@ document.addEventListener('DOMContentLoaded', () => {
         return 'Low';
     }
 
-    function simulateRace(raceHorses, raceId) {
-        raceHorses = enrichHorses(raceHorses);
+    // [8][9] 単勝ロット適正化（推奨度×クラス）
+    // 2026-07-19: SSS列をSS水準へ縮小（live SSS回収64.8%/n=29。h11復帰条件あり）
+    // simulateRace と computeEvShadow の双方から参照する共通テーブル/関数（挙動は変更前と同一）
+    const UNIT_TABLE = {
+        'A3': { SSS: 5, SS: 5, S: 5, Low: 0 },
+        'B2': { SSS: 2, SS: 2, S: 2, Low: 0 }, // [9]
+        'A2': { SSS: 2, SS: 2, S: 2, Low: 0 },
+        'B1': { SSS: 1, SS: 1, S: 1, Low: 0 }, // [8] 全推奨度1U (Low=0)
+        'D1': { SSS: 1, SS: 1, S: 1, Low: 0 },
+        'B3': { SSS: 1, SS: 1, S: 1, Low: 0 }
+    };
+    function getWinUnits(cls, rec, raceHorses0) {
+        if (rec === 'Low') return 0;
+        let base = UNIT_TABLE[cls] && UNIT_TABLE[cls][rec];
+        if (base === undefined) base = 1;
+        if (base === 0) return 0;
+        // 2026-07-12: ダ1401m+・重賞はユニット半減（最低1U維持）h5/h6
+        const isGraded = raceHorses0 && ((raceHorses0["グレード・頭数"] || "").includes("G") || (raceHorses0["グレード・頭数"] || "").includes("重賞"));
+        if (isGraded || (surfaceOfRow(raceHorses0) === 'ダ' && distanceOfRow(raceHorses0) >= 1401)) {
+            return Math.max(1, Math.floor(base / 2));
+        }
+        return base;
+    }
+
+    // simulateRace 内の単勝払戻決定ロジック（本来の挙動を維持したまま関数抽出。computeEvShadow と共有）
+    function buildRacePayouts(raceHorses) {
+        const dateStr = (raceHorses[0] && raceHorses[0]["日付"]) ? raceHorses[0]["日付"].trim() : "";
+        const forceRecalculateWin = dateStr === "Legacy" || dateStr === "" || dateStr < "2026-04-05";
+
+        let winPayoutMap = {};
+        let trioPayout = 0;
+
+        raceHorses.forEach(h => {
+            if (forceRecalculateWin && finishOf(h) === 1) {
+                // 2026-04-05以前は、単勝払戻データを無視してオッズから自己検算
+                const odds = oddsOf(h);
+                if (odds > 0) {
+                    winPayoutMap[h["馬番"]] = Math.round(odds * 10) * 10;
+                }
+            } else {
+                // それ以降はCSVの値を優先（コロン形式 '馬番: 金額円' を正しく解釈）
+                const w = parseColonPayout(h["単勝払戻"]);
+                if (w.key !== null && w.pay > 0) {
+                    winPayoutMap[w.key] = w.pay;        // 勝ち馬の馬番に紐付け
+                } else if (w.pay > 0) {
+                    winPayoutMap[h["馬番"]] = w.pay;     // 旧レース値形式
+                } else if (finishOf(h) === 1) {
+                    // フォールバック
+                    const odds = oddsOf(h);
+                    if (odds > 0) winPayoutMap[h["馬番"]] = Math.round(odds * 10) * 10;
+                }
+            }
+
+            const tPay = parseColonPayout(h["三連複払戻"]).pay; // '1-3-5: 5930円'→5930
+            if (tPay > 0) trioPayout = tPay;
+        });
+
+        return { winPayoutMap, trioPayout };
+    }
+
+    function simulateRace(raceHorses, raceId, evTransform = null) {
+        raceHorses = enrichHorses(raceHorses, evTransform);
         const classes = raceHorses.map(h => clsOf(h));
         const density = calculateSSDensity(raceHorses);
         
@@ -756,62 +842,14 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
-        const dateStr = (raceHorses[0] && raceHorses[0]["日付"]) ? raceHorses[0]["日付"].trim() : "";
-        const forceRecalculateWin = dateStr === "Legacy" || dateStr === "" || dateStr < "2026-04-05";
-
-        let actualWinPayoutMap = {};
-        let actualTrioPayout = 0;
-
-        raceHorses.forEach(h => {
-            if (forceRecalculateWin && finishOf(h) === 1) {
-                // 2026-04-05以前は、単勝払戻データを無視してオッズから自己検算
-                const odds = oddsOf(h);
-                if (odds > 0) {
-                    actualWinPayoutMap[h["馬番"]] = Math.round(odds * 10) * 10;
-                }
-            } else {
-                // それ以降はCSVの値を優先（コロン形式 '馬番: 金額円' を正しく解釈）
-                const w = parseColonPayout(h["単勝払戻"]);
-                if (w.key !== null && w.pay > 0) {
-                    actualWinPayoutMap[w.key] = w.pay;        // 勝ち馬の馬番に紐付け
-                } else if (w.pay > 0) {
-                    actualWinPayoutMap[h["馬番"]] = w.pay;     // 旧レース値形式
-                } else if (finishOf(h) === 1) {
-                    // フォールバック
-                    const odds = oddsOf(h);
-                    if (odds > 0) actualWinPayoutMap[h["馬番"]] = Math.round(odds * 10) * 10;
-                }
-            }
-
-            const tPay = parseColonPayout(h["三連複払戻"]).pay; // '1-3-5: 5930円'→5930
-            if (tPay > 0) actualTrioPayout = tPay;
-        });
+        const { winPayoutMap: actualWinPayoutMap, trioPayout: actualTrioPayout } = buildRacePayouts(raceHorses);
 
         let winInvest = 0;
         let winReturn = 0;
         let amberFailInvest = 0;
         let amberFailReturn = 0;
 
-        // [8][9] 単勝ロット適正化（推奨度×クラス）
-        const UNIT_TABLE = {
-            'A3': { SSS: 6, SS: 5, S: 5, Low: 0 },
-            'B2': { SSS: 3, SS: 2, S: 2, Low: 0 }, // [9]
-            'A2': { SSS: 2, SS: 2, S: 2, Low: 0 },
-            'B1': { SSS: 1, SS: 1, S: 1, Low: 0 }, // [8] 全推奨度1U (Low=0)
-            'D1': { SSS: 1, SS: 1, S: 1, Low: 0 },
-            'B3': { SSS: 1, SS: 1, S: 1, Low: 0 }
-        };
-        const getUnits = (cls) => {
-            if (rec === 'Low') return 0;
-            let base = UNIT_TABLE[cls] && UNIT_TABLE[cls][rec];
-            if (base === undefined) base = 1;
-            if (base === 0) return 0;
-            // 2026-07-12: ダ1401m+・重賞はユニット半減（最低1U維持）h5/h6
-            if (isGraded || (surfaceOfRow(raceHorses[0]) === 'ダ' && distanceOfRow(raceHorses[0]) >= 1401)) {
-                return Math.max(1, Math.floor(base / 2));
-            }
-            return base;
-        };
+        const getUnits = (cls) => getWinUnits(cls, rec, raceHorses[0]);
 
         finalWinBets.forEach(h => {
             const cls = clsOf(h);
@@ -882,6 +920,88 @@ document.addEventListener('DOMContentLoaded', () => {
             trioReturn: skipTrio ? 0 : refTrioReturn,
             refTrioInvest: refTrioInvest,
             refTrioReturn: refTrioReturn
+        };
+    }
+
+    // --- EV較正シャドー並走（変更D・2026-07-19） ---
+    // 目的: winCoreでEVと実回収が無相関(slope=-0.0198, n=1146)のため、市場ブレンド較正候補を
+    // 並走記録のみで評価する。本番の買い目・集計（simulateRaceの通常呼び出し）は一切変更しない。
+    // p_cal = 0.5*p_model + 0.5*(0.8/odds); ev_cal = p_cal*odds (=0.5*EV+0.4)
+    function computeEvShadow(raceMap, liveIds) {
+        const shadowTransform = ({ winRate, ev, odds }) => {
+            const marketRate = odds > 0 ? (0.8 / odds) : 0;
+            const winRateShadow = 0.5 * winRate + 0.5 * marketRate;
+            const evShadow = Math.floor(winRateShadow * odds * 1000 + 1e-9) / 1000; // truncateTo3相当
+            return { winRate: winRateShadow, ev: evShadow };
+        };
+
+        // 生の行データからシャローコピーしてシミュレーション（本番行オブジェクトの enrich 済み
+        // プロパティ（購入時クラス・購入時期待値・amberPass等）は enrichHorses が代入する
+        // 新規/既存の「トップレベルプロパティ」のみのため、{...h} のシャローコピーで本番行を汚染しない）。
+        const shadowRaces = Object.keys(raceMap).map(id => {
+            const cloned = raceMap[id].map(h => ({ ...h }));
+            return simulateRace(cloned, id, shadowTransform);
+        });
+
+        function aggregate(races) {
+            let betCount = 0, invest = 0, payout = 0, hits = 0;
+            const classMap = {};
+
+            races.forEach(race => {
+                if (race.rec === 'Low') return; // rec==='Low'は0
+                const { winPayoutMap } = buildRacePayouts(race.horses);
+
+                (race.finalWinBets || []).forEach(h => {
+                    const cls = clsOf(h);
+                    const units = getWinUnits(cls, race.rec, race.horses[0]);
+                    if (units <= 0) return;
+                    const bInvest = units * 100;
+                    let bPayout = 0;
+                    const isHit = finishOf(h) === 1;
+                    if (isHit) {
+                        const umaban = h["馬番"];
+                        bPayout = winPayoutMap[umaban] ? winPayoutMap[umaban] * units : (oddsOf(h)) * 100 * units;
+                    }
+
+                    betCount += 1;
+                    invest += bInvest;
+                    payout += bPayout;
+                    if (isHit) hits += 1;
+
+                    if (!classMap[cls]) classMap[cls] = { cls, n: 0, hits: 0, invest: 0, payout: 0 };
+                    classMap[cls].n += 1;
+                    classMap[cls].invest += bInvest;
+                    classMap[cls].payout += bPayout;
+                    if (isHit) classMap[cls].hits += 1;
+                });
+            });
+
+            const classPerformance = Object.values(classMap).map(c => ({
+                cls: c.cls,
+                n: c.n,
+                hits: c.hits,
+                recoveryRate: c.invest > 0 ? (c.payout / c.invest) * 100 : 0
+            }));
+
+            return {
+                betCount,
+                invest,
+                payout,
+                recoveryRate: invest > 0 ? (payout / invest) * 100 : 0,
+                hitRate: betCount > 0 ? (hits / betCount) * 100 : 0,
+                classPerformance
+            };
+        }
+
+        const liveShadowRaces = shadowRaces.filter(r => r.horses && r.horses[0] && liveIds.has(getRaceId(r.horses[0])));
+
+        return {
+            formula: 'p_cal = 0.5*p_model + 0.5*(0.8/odds); ev_cal = p_cal*odds (=0.5*EV+0.4)',
+            alpha: 0.5,
+            takeout: 0.8,
+            note: 'シャドー並走。本番執行は現行EVのまま。live n≧150で現行liveOnlyViewと比較し、上回らなければ破棄(h14…登録なし、次回査定で判断)',
+            allPeriod: aggregate(shadowRaces),
+            liveOnly: aggregate(liveShadowRaces)
         };
     }
 
@@ -2706,6 +2826,22 @@ document.addEventListener('DOMContentLoaded', () => {
                     winCore: window.latestCalibration.winCore || null,
                     all: window.latestCalibration.all || null
                 } : null,
+                // 変更D(2026-07-19): EV較正候補（市場ブレンドα=0.5）のシャドー並走成績。本番執行・上記evCalibrationは非汚染。
+                evCalibrationShadow: (() => {
+                    try {
+                        const shadowRaceMap = {};
+                        (rowsWithRank || []).forEach(r => {
+                            const id = getRaceId(r);
+                            if (!shadowRaceMap[id]) shadowRaceMap[id] = [];
+                            shadowRaceMap[id].push(r);
+                        });
+                        const shadowLiveIds = buildLiveRaceIdSet();
+                        return computeEvShadow(shadowRaceMap, shadowLiveIds);
+                    } catch (e) {
+                        console.error('evCalibrationShadow error:', e);
+                        return null;
+                    }
+                })(),
                 // 評価ランク別キャリブレーション検証: 勝率モデル（score/totalScore）の予測勝率と実勝率の乖離
                 rankCalibration: (calibrationStats || []).map(s => ({
                     rank: s.rank,
@@ -3813,12 +3949,13 @@ document.addEventListener('DOMContentLoaded', () => {
   - X: D かつ 3.000〜3.999 ／ D1: D かつ 1.300〜1.799
   - 上記いずれにも該当しなければ N（買い目対象外）
 - 系統: Place-Core/軸・防御 = {S0,S1,S2,A0,B0+,A1,B0}／ Win-Core/攻撃 = {A3,B2,A2,B1,D1,B3,X}
-- MAO（最低必要オッズ）: 防御系=0.60÷勝率, 攻撃系(B1,B2,B3,A2,A3)=0.90÷勝率, X=3.00÷勝率, D1=1.50÷勝率
+- MAO（最低必要オッズ）: 防御系=0.60÷勝率, 攻撃系(B1,B2,B3,A2,A3)=0.90÷勝率, X=3.00÷勝率(購入停止中), D1=1.70÷勝率
 - 琥珀監査(Amber)通過条件: X・D1 → オッズ≧MAO ／ その他 → オッズ≧MAO×1.2
 - SS密度 = (EV≧1.300 かつ 評価∈{S,A,B,D} の頭数) ÷ max(12, 出走頭数)
 - 推奨度: 密度≧0.250 かつ S0/S1あり→SSS ／ 密度≧0.250 かつ 軸あり→SS ／ 密度≧0.150→S ／ それ未満→Low
-- 三連複の執行判定: 軸不在、または 密度 <（重賞0.10 / 平場0.15）なら SKIP
-- 単勝ユニット配分: SSS(A3=6,B2=4,他=2) ／ SS(A3=5,B2=3,他=2) ／ S(A3=3,B2=2,他=1) ／ Low(すべて1)
+- 三連複の執行判定: 推奨度SSのみ執行（SSS/S/LowはSKIP・refで追跡）。加えて軸不在、または 密度 <（重賞0.10 / 平場0.15）でもSKIP
+- 単勝ユニット配分: SSS/SS/S共通(A3=5,B2=2,A2=2,B1/D1/B3=1) ／ Low(すべて0)
+- evCalibrationShadow: EV較正候補(市場ブレンドα=0.5)のシャドー成績。liveOnly.recoveryRate が liveOnlyView の単勝回収率を明確に上回る場合のみ較正切替を提案してよい
 `;
 
         // 詳細なレース別データは「AI分析用データ出力 (JSON)」ボタンで出力したファイルを
