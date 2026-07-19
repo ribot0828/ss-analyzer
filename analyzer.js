@@ -498,6 +498,22 @@ document.addEventListener('DOMContentLoaded', () => {
                 all: calculateCalibration(filterCalibRows(rowsWithRank, 'all'))
             };
 
+            // 2026-07-19: 実運用のみ(liveOnly)の単勝回収率をダッシュボードに常時表示（意思決定の正）
+            try {
+                const liveWinRoiEl = document.getElementById('stat-live-win-roi');
+                if (liveWinRoiEl) {
+                    const lov = computeLiveOnlyView(rowsWithRank);
+                    window.latestLiveOnlyView = lov;
+                    if (lov && lov.summary) {
+                        liveWinRoiEl.textContent = `${lov.summary.overallWinRecoveryRate.toFixed(1)}% (${lov.summary.totalRaces}R)`;
+                    } else {
+                        liveWinRoiEl.textContent = '実運用データなし';
+                    }
+                }
+            } catch (e) {
+                console.error('liveOnly dashboard tile error:', e);
+            }
+
             const outliers = detectOutliers(rowsWithRank);
 
             const aiPrompts = generateUltimateMarkdown(riskStats, classStats, recStats, outliers, simulatedRaces);
