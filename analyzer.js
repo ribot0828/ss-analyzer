@@ -151,6 +151,11 @@ document.addEventListener('DOMContentLoaded', () => {
             id: 'h14', name: '攻撃系序列R2監視', registeredOn: '2026-07-19', dataFrom: '2026-07-19', direction: '観察',
             condition: '序列R2(A3→B2→B3→D1→A2→B1)はバックテストでフル+14.1pt/R3-0.4pt・R3のDD+42U/連敗27。R3運用中は見送り。フルモード復帰時または新liveデータ再測定でR3リスク非悪化を確認できたら採用審議（backtest_v534_priority.py）',
             compute: null // 手動判定（バックテスト再実行で判定）
+        },
+        {
+            id: 'h15', name: 'R3推奨度連動ステーク', registeredOn: '2026-07-19', dataFrom: '2026-07-19', direction: '削る',
+            condition: '2026-07-19切替(SS=3U・SSS/S=1U)。S推奨: 登録日以降live n≧150で単勝回収≧100%なら一律3U復帰を審議／SSS側はh11(n≧60でSSS>SS)と連動',
+            compute: null // 手動判定（recommendationPerformance.S / SSS を参照）
         }
     ];
 
@@ -1173,8 +1178,9 @@ document.addEventListener('DOMContentLoaded', () => {
             };
         };
 
-        // --- R3: 単勝優先順位・先頭1点のみ／3U固定 ---
+        // --- R3: 単勝優先順位・先頭1点のみ／推奨度連動ステーク（V5' 2026-07-19〜） ---
         // Low推奨度はエンジン(winTargets空)・バックテストR3とも全スキップのため、ここでも購入しない
+        // SS=3U(300円)・SSS/S=1U(100円)。根拠: backtest_r3_stake_variants.py V5'（liveOnly回収227.1%）
         const r3Bets = [];
         let skippedRaces = 0;
         sortedRaces.forEach(r => {
@@ -1183,10 +1189,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 skippedRaces++;
                 return;
             }
-            const invest = 300; // 3U固定
+            const units = r.rec === 'SS' ? 3 : 1;
+            const invest = units * 100;
             let payout = 0;
             if (finishOf(pick) === 1) {
-                payout = derivePayoutPerUnit(r.horses, pick) * 3;
+                payout = derivePayoutPerUnit(r.horses, pick) * units;
             }
             r3Bets.push({ invest, payout });
         });
@@ -2561,7 +2568,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 </table>
             </div>
             <p class="text-xs text-slate-500 mt-2">
-                ※R3＝各レースの単勝優先最上位1点に3U固定（残高2万円未満時の採用ルール・2026-07-09）。資金残高の推移は考慮しないフラット計測。
+                ※R3＝各レースの単勝優先最上位1点を購入（残高2万円未満時の採用ルール・2026-07-09）。ステークは推奨度連動(SS=3U・SSS/S=1U、2026-07-19〜)。資金残高の推移は考慮しないフラット計測。
                 買い目なし（ノーベット）: 現行フル ${full.skippedRaces ?? 0}レース / R3 ${sim.skippedRaces ?? 0}レース。${liveSim ? ` 実運用のみ: 現行フル ${(liveSim.fullAllocation || {}).skippedRaces ?? 0}レース / R3 ${liveSim.skippedRaces ?? 0}レース` : ''}
             </p>
         `;
@@ -4041,6 +4048,7 @@ document.addEventListener('DOMContentLoaded', () => {
 - 推奨度: 密度≧0.250 かつ S0/S1あり→SSS ／ 密度≧0.250 かつ 軸あり→SS ／ 密度≧0.150→S ／ それ未満→Low
 - 三連複の執行判定: 推奨度SSのみ執行（SSS/S/LowはSKIP・refで追跡）。加えて軸不在、または 密度 <（重賞0.10 / 平場0.15）でもSKIP
 - 単勝ユニット配分: SSS/SS/S共通(A3=5,B2=2,A2=2,B1/D1/B3=1) ／ Low(すべて0)
+- R3小資金モード（現行運用）: 単勝優先順位1位の1点のみ購入。ステークは推奨度連動 SS=3U ／ SSS・S=1U ／ Low=0
 - evCalibrationShadow: EV較正候補(市場ブレンドα=0.5)のシャドー成績。liveOnly.recoveryRate が liveOnlyView の単勝回収率を明確に上回る場合のみ較正切替を提案してよい
 `;
 
