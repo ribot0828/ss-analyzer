@@ -146,6 +146,11 @@ document.addEventListener('DOMContentLoaded', () => {
             id: 'h13', name: '後半ROI減衰監視', registeredOn: '2026-07-19', dataFrom: '2026-07-19', direction: '観察',
             condition: 'liveOnlyView.timeSplitStability: 後半ROI<100%が次回サイクルも継続なら全体ユニット縮小を審議',
             compute: null // 手動判定（timeSplitStabilityを参照）
+        },
+        {
+            id: 'h14', name: '攻撃系序列R2監視', registeredOn: '2026-07-19', dataFrom: '2026-07-19', direction: '観察',
+            condition: '序列R2(A3→B2→B3→D1→A2→B1)はバックテストでフル+14.1pt/R3-0.4pt・R3のDD+42U/連敗27。R3運用中は見送り。フルモード復帰時または新liveデータ再測定でR3リスク非悪化を確認できたら採用審議（backtest_v534_priority.py）',
+            compute: null // 手動判定（バックテスト再実行で判定）
         }
     ];
 
