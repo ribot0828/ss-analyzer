@@ -18,6 +18,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const geminiExportSection = document.getElementById('geminiExportSection');
     const copyGeminiBtn = document.getElementById('copyGeminiBtn');
     const copyClaudeBtn = document.getElementById('copyClaudeBtn');
+    const copySpecBtn = document.getElementById('copySpecBtn');
     const toast = document.getElementById('toast');
 
     // Filters
@@ -45,6 +46,34 @@ document.addEventListener('DOMContentLoaded', () => {
     ];
     // 「統合」CSVエクスポート用ヘッダー（既存列+新規列。既存列の並び・内容は変更しない）
     const EXPECTED_HEADERS_WITH_NEW = EXPECTED_HEADERS.concat(NEW_OPTIONAL_COLUMNS);
+
+    // ロジック仕様サマリー。エンジンのロジック変更時は本文と SPEC_UPDATED を必ずセットで更新すること
+    const SPEC_UPDATED = "2026-07-20";
+    const SPEC_BLOCK = `
+---
+### ◤ SS-Engine 現行仕様（前提）◢
+- スコア: S=100, A=65, B=40, C=20, D=10, E=3, F=0.5
+- 予想勝率 = 自スコア ÷ 出走全馬スコア合計（オッズ>0の馬のみ）
+- 期待値EV = 予想勝率 × 単勝オッズ（小数第3位以下を切り捨て）
+- クラス分類（評価ランク × EV帯）:
+  - S0: S かつ EV<0.700 ／ S1: S かつ 0.700〜0.999 ／ S2: S かつ 1.200〜1.499
+  - A0: A かつ EV<0.600 ／ A1: A かつ 0.600〜0.899 ／ A2: A かつ 1.000〜1.250 ／ A3: A かつ 1.500〜1.699
+  - B0+: B かつ EV≦0.500 ／ B0: B かつ 0.500〜0.900 ／ B1: B かつ 1.100〜1.350 ／ B2: B かつ 1.500〜1.699 ／ B3: B かつ 2.000〜4.500
+  - D1: D かつ 1.300〜1.799 ／ （旧X＝D×EV3.000〜3.999 は2026-07-12廃止・N扱い）
+  - 上記いずれにも該当しなければ N（買い目対象外）
+- 系統: Place-Core/軸・防御 = {S0,S1,S2,A0,B0+,A1,B0}／ Win-Core/攻撃 = {A3,B2,A2,D1,B1,B3}
+- 単勝優先順位: A3→B2→A2→D1→B1→B3（Kelly比。R3はこの1位のみ購入）
+- 壁フィルター: 馬番13以上の A1/S2/A0 は単勝候補から除外
+- MAO（最低必要オッズ）: 防御系=0.60÷勝率, 攻撃系(B1,B2,B3,A2,A3)=0.90÷勝率, D1=1.70÷勝率
+- 琥珀監査(Amber)通過条件: D1 → オッズ≧MAO ／ その他 → オッズ≧MAO×1.2
+- SS密度 = (EV≧1.300 かつ 評価∈{S,A,B,D} の頭数) ÷ max(12, 出走頭数)
+- 推奨度: 密度≧0.250 かつ S0/S1あり→SSS ／ 密度≧0.250 かつ 軸あり→SS ／ 密度≧0.150→S ／ それ未満→Low
+- 三連複（軸1頭ながし・上限3点）の執行判定: 推奨度SSのみ執行（SSS/S/LowはSKIP・refで追跡）。加えて軸不在、または 密度 <（重賞0.10 / 平場0.15）でもSKIP
+- 単勝ユニット配分: SSS/SS/S共通(A3=5,B2=2,A2=2,B1/D1/B3=1) ／ Low(すべて0)
+- 半減ルール: ダート1401m以上 または 重賞 は単勝ユニット max(1, floor(基本値/2))
+- R3小資金モード（現行運用）: 単勝優先順位1位の1点のみ購入。ステークは推奨度連動 SS=3U ／ SSS・S=1U ／ Low=0
+- evCalibrationShadow: EV較正候補(市場ブレンドα=0.5)のシャドー成績。liveOnly.recoveryRate が liveOnlyView の単勝回収率を明確に上回る場合のみ較正切替を提案してよい
+`;
 
     // --- 共通フィールドアクセサ ---
     // 判定（クラス分類・EV・勝率・MAO・Amber・SS密度・推奨度・オッズ帯ビニング）は購入時オッズ基準で行う。
@@ -4034,37 +4063,11 @@ document.addEventListener('DOMContentLoaded', () => {
         // ここまでの md = データ本体（リスク指標・クラス別・推奨度別・異常値）。両AI共通で先頭に付ける。
         const reportBody = md;
 
-        const specBlock = `
----
-### ◤ SS-Engine 現行仕様（前提）◢
-- スコア: S=100, A=65, B=40, C=20, D=10, E=3, F=0.5
-- 予想勝率 = 自スコア ÷ 出走全馬スコア合計（オッズ>0の馬のみ）
-- 期待値EV = 予想勝率 × 単勝オッズ（小数第3位以下を切り捨て）
-- クラス分類（評価ランク × EV帯）:
-  - S0: S かつ EV<0.700 ／ S1: S かつ 0.700〜0.999 ／ S2: S かつ 1.200〜1.499
-  - A0: A かつ EV<0.600 ／ A1: A かつ 0.600〜0.899 ／ A2: A かつ 1.000〜1.250 ／ A3: A かつ 1.500〜1.699
-  - B0+: B かつ EV≦0.500 ／ B0: B かつ 0.500〜0.900 ／ B1: B かつ 1.100〜1.350 ／ B2: B かつ 1.500〜1.699 ／ B3: B かつ 2.000〜4.500
-  - D1: D かつ 1.300〜1.799 ／ （旧X＝D×EV3.000〜3.999 は2026-07-12廃止・N扱い）
-  - 上記いずれにも該当しなければ N（買い目対象外）
-- 系統: Place-Core/軸・防御 = {S0,S1,S2,A0,B0+,A1,B0}／ Win-Core/攻撃 = {A3,B2,A2,D1,B1,B3}
-- 単勝優先順位: A3→B2→A2→D1→B1→B3（Kelly比。R3はこの1位のみ購入）
-- 壁フィルター: 馬番13以上の A1/S2/A0 は単勝候補から除外
-- MAO（最低必要オッズ）: 防御系=0.60÷勝率, 攻撃系(B1,B2,B3,A2,A3)=0.90÷勝率, D1=1.70÷勝率
-- 琥珀監査(Amber)通過条件: D1 → オッズ≧MAO ／ その他 → オッズ≧MAO×1.2
-- SS密度 = (EV≧1.300 かつ 評価∈{S,A,B,D} の頭数) ÷ max(12, 出走頭数)
-- 推奨度: 密度≧0.250 かつ S0/S1あり→SSS ／ 密度≧0.250 かつ 軸あり→SS ／ 密度≧0.150→S ／ それ未満→Low
-- 三連複（軸1頭ながし・上限3点）の執行判定: 推奨度SSのみ執行（SSS/S/LowはSKIP・refで追跡）。加えて軸不在、または 密度 <（重賞0.10 / 平場0.15）でもSKIP
-- 単勝ユニット配分: SSS/SS/S共通(A3=5,B2=2,A2=2,B1/D1/B3=1) ／ Low(すべて0)
-- 半減ルール: ダート1401m以上 または 重賞 は単勝ユニット max(1, floor(基本値/2))
-- R3小資金モード（現行運用）: 単勝優先順位1位の1点のみ購入。ステークは推奨度連動 SS=3U ／ SSS・S=1U ／ Low=0
-- evCalibrationShadow: EV較正候補(市場ブレンドα=0.5)のシャドー成績。liveOnly.recoveryRate が liveOnlyView の単勝回収率を明確に上回る場合のみ較正切替を提案してよい
-`;
-
         // 詳細なレース別データは「AI分析用データ出力 (JSON)」ボタンで出力したファイルを
         // 各AIのチャットに添付して渡す運用。コピーには文字数節約のためJSONを含めない。
 
         // ① 提案用（Gemini に貼る）
-        const geminiMd = reportBody + specBlock + `
+        const geminiMd = reportBody + SPEC_BLOCK + `
 ---
 ## 🟦 あなたの役割: 改善提案者（ステップ①）
 
@@ -4100,7 +4103,7 @@ document.addEventListener('DOMContentLoaded', () => {
 `;
 
         // ②③ 検証・統合用（Claude に貼る）
-        const claudeMd = reportBody + specBlock + `
+        const claudeMd = reportBody + SPEC_BLOCK + `
 ---
 ## 🟧 あなたの役割: 改善案の検証者・統合者（ステップ②→③）
 
@@ -4194,6 +4197,38 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (copyGeminiBtn) copyGeminiBtn.addEventListener('click', () => copyTextarea(geminiOutput, "Gemini用"));
     if (copyClaudeBtn) copyClaudeBtn.addEventListener('click', () => copyTextarea(claudeOutput, "Claude用"));
+
+    function buildSpecDoc() {
+        return `# SS-Engine 現行ロジック仕様（v5.34系 ／ 仕様更新日: ${SPEC_UPDATED}）
+
+以下はSS-Engineの現行パラメータ仕様のスナップショット。分析AIへの前提知識として使用する。実績データ・レース別JSONは別途出力して添付する。
+${SPEC_BLOCK}`;
+    }
+
+    const copyTextToClipboard = (text) => {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            return navigator.clipboard.writeText(text);
+        }
+        return new Promise((resolve, reject) => {
+            const ta = document.createElement('textarea');
+            ta.value = text;
+            ta.style.position = 'fixed';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.focus();
+            ta.select();
+            let ok = false;
+            try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+            document.body.removeChild(ta);
+            if (ok) resolve(); else reject(new Error('copy failed'));
+        });
+    };
+
+    if (copySpecBtn) copySpecBtn.addEventListener('click', () => {
+        copyTextToClipboard(buildSpecDoc())
+            .then(() => showToast(`ロジック仕様をコピーしました（更新日: ${SPEC_UPDATED}）`))
+            .catch(() => showToast("コピーに失敗しました"));
+    });
 
     function showToast(msg) {
         toast.textContent = msg;

@@ -353,6 +353,10 @@
             <section id="geminiExportSection" class="glass-panel animate-fade hidden">
                 <h2 class="text-xl font-semibold mb-1">🤝 AI討論コピー</h2>
                 <p class="text-xs text-slate-400 mb-4">コピーは指示テキストのみ（軽量）。詳細データは上の「📊 AI分析用データ出力 (JSON)」で書き出したファイルを各AIのチャットに<strong>添付</strong>してください。<br>① 左「Gemini用」をコピーして Gemini に貼る（＋JSON添付）→ 出た提案を全文コピー ／ ② 右「Claude用」をコピーして Claude に貼り（＋JSON添付）、続けて末尾にGeminiの提案を貼る → 検証(②)と統合(③)は<strong>同じClaudeチャット内</strong>で連続実行します。</p>
+                <div class="flex justify-between items-center mb-4 gap-2 flex-wrap">
+                    <p class="text-xs text-slate-400">現行仕様のみ（解析不要・Gemini等の前提知識用）</p>
+                    <button id="copySpecBtn" class="btn-primary px-4 py-2 rounded-md text-sm">ロジック仕様のみコピー</button>
+                </div>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                         <div class="flex justify-between items-center mb-2">
@@ -403,6 +407,6 @@
         メッセージ
     </div>
 
-    <script src="analyzer.js?v=2026-07-20a"></script>
+    <script src="analyzer.js?v=2026-07-20b"></script>
 </body>
 </html>
