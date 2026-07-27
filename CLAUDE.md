@@ -14,6 +14,7 @@
 - CSV単勝払戻列は2026-06-06以降 `馬番: 金額円` 形式に変化。コロンを無視して連結パースすると桁が化けるバグが過去にあった（`parseColonPayout` で修正済み、同種の列を新規に扱う際は要注意）。
 - `enrichHorses` はCSVのクラス/EV列を無視し、評価×購入時オッズから現行ロジックで再計算・上書きする。CSV生ラベルとJSON集計は一致しないことがある点に注意。
 - ロジック仕様を変更したら analyzer.js の SPEC_BLOCK と SPEC_UPDATED（仕様更新日）を必ずセットで更新する。
+- 集計フィールドの母集団定義は `DATA_DICT_BLOCK`（AIプロンプトに挿入）と `jsonPayload._dataDictionary`（JSON先頭に埋め込み）の2箇所にある。集計ロジックを変えたら両方＋SPEC_BLOCKを更新する。この辞書は外部AI（Gemini/Claude）の母集団取り違えを防ぐためのもの。
 
 ## よくある作業
 - バックテスト・集計ロジックの変更 → `analyzer.js`（`EXPECTED_HEADERS`, `HYPOTHESIS_REGISTRY`, フィルタ・シミュレーター関数群）

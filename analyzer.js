@@ -48,7 +48,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const EXPECTED_HEADERS_WITH_NEW = EXPECTED_HEADERS.concat(NEW_OPTIONAL_COLUMNS);
 
     // ロジック仕様サマリー。エンジンのロジック変更時は本文と SPEC_UPDATED を必ずセットで更新すること
-    const SPEC_UPDATED = "2026-07-20";
+    const SPEC_UPDATED = "2026-07-27";
     const SPEC_BLOCK = `
 ---
 ### ◤ SS-Engine 現行仕様（前提）◢
@@ -72,7 +72,52 @@ document.addEventListener('DOMContentLoaded', () => {
 - 単勝ユニット配分: SSS/SS/S共通(A3=5,B2=2,A2=2,B1/D1/B3=1) ／ Low(すべて0)
 - 半減ルール: ダート1401m以上 または 重賞 は単勝ユニット max(1, floor(基本値/2))
 - R3小資金モード（現行運用）: 単勝優先順位1位の1点のみ購入。ステークは推奨度連動 SS=3U ／ SSS・S=1U ／ Low=0
-- evCalibrationShadow: EV較正候補(市場ブレンドα=0.5)のシャドー成績。liveOnly.recoveryRate が liveOnlyView の単勝回収率を明確に上回る場合のみ較正切替を提案してよい
+- EV較正の合否判定(H2): slope は r²≧0.30 のときだけ有効。r²<0.30 なら回帰に説明力が無いため【判定不能】とし、slopeの値に関わらずEV式本体の補正を最優先扱いにしない（実績: slope は 0.2843→0.2288→-0.0326→-0.0051→-0.0198→0.1235 と6サイクル符号反転、r²は0.0001〜0.16。h19参照）
+- evCalibrationShadow: EV較正候補(市場ブレンドα=0.5)のシャドー成績。式は p_cal=0.5*p+0.5*(0.8/odds) ⇔ ev_cal = 0.5*EV + 0.4 の【アフィン(単調)変換】であり、レース内の馬の序列は変わらない＝実体は全クラス境界の一括付け替え。よって「較正でslopeが直る／序列が改善する」という主張は成立しない（slopeは1/0.5倍になるだけ）
+- 較正切替を提案してよい条件（全て必須）: ①liveOnly n≧300 ②【絶対損益(payout−invest)】が現行R3運用(liveOnlyView.smallBankSimulation)を上回る ③的中率の低下が現行比 −3pt以内 ④防御系(B0+/S0等)・SS密度・推奨度・三連複への影響を含めた全系統の再シミュレーションでR3のmaxDDが悪化しない
+`;
+
+    // 添付JSONのフィールド定義と母集団の説明。集計ロジックを変えたら必ずここも更新すること
+    const DATA_DICT_BLOCK = `
+---
+### ◤ 参照データ辞書（誤読防止・必読）◢
+このメッセージ本文の表と、添付JSON(ss_feedback_data.json)は【母集団が違う】。根拠を書くときは必ず「フィールド名(フルパス) / n / 母集団」を明記すること。
+
+【0】本文の表1〜4について
+- 表1〜4はすべて【全期間（紙上シミュレーション期間を含む）】かつ【全買い目購入(フル配分)】ベースの参考値。現行運用の実績ではない。
+
+【1】意思決定の正 = liveOnlyView（実行フラグが記録された実運用レースのみで再計算）
+- liveOnlyView.smallBankSimulation … ★現行運用(R3小資金モード)そのものの成績。各レース単勝優先順位1位を1点だけ購入、ステークは推奨度連動。R3に関する提案の一次根拠はここ。
+- liveOnlyView.smallBankSimulation.fullAllocation … 同じレース群を「全買い目購入」した場合の仮想成績。現在は運用していない比較用。
+- liveOnlyView.summary.overallWinRecoveryRate … ↑fullAllocation と同じ母集団の単勝回収率。★これは現行運用(R3)の回収率ではない。「現行の回収率」と呼んではいけない。
+- liveOnlyView.classPerformance … 実運用レースのクラス別成績。ただし【2】の通り「そのクラスに分類された全馬」であって購入馬ではない。
+- liveOnlyView.recommendationPerformance … 推奨度別。sampleRaces はレース数、winHitRate の分母は単勝を買ったレース数（別物なので混同しない）。
+- トップレベルの同名フィールド(summary / classPerformance / smallBankSimulation …)は全期間値。参考のみ。全期間値だけを根拠にした増額・緩和系の提案は禁止。
+
+【2】母集団の違い（最頻出の誤読）
+- classPerformance … 購入時クラスで分類された【全馬】。壁フィルタ・単勝優先順位・R3の1点縛りは反映されない。D1/XのAmber不通過馬は "D1(NG)" 等の別キーに分離済み。
+- evaluationPerformance … 【評価ランク(S〜F)×EV帯】の全馬集計。クラス(A2/B2…)別ではない。例えばランクAのEV1.0〜1.09帯には A2 以外(N扱い)の馬も混ざる。★クラス境界の提案には必ず classPerformance[].evDetails（クラス別EV帯）を使うこと。
+- oddsDriftAnalysis / marginAnalysis / favoriteStructureAnalysis / equityCurveStats / surfaceDistanceAnalysis / runningStyleAnalysis / trackConditionAnalysis … 実行フラグ○のwin-Core馬のみ（フル配分で実際に買った馬）・全期間。
+- amberAudit.passed/failed … 監査通過/不通過別の全期間成績。
+- betTimingAnalysis … 実際の購入タイミング（発走何分前）。「締切直前に判定して取消す」系の提案は、このp10〜p90の中で実行可能かを必ず確認する。
+
+【3】比較のルール
+- ROI(%)だけで優劣を決めない。必ず betCount / hitRate / invest / payout /【絶対損益 = payout − invest】を併記する。賭け金総額が減る変更は、ROI%が上がっても損益が減ることがある。
+- 比較相手は同じ母集団・同じ配分方式にそろえる（R3の話に fullAllocation の数字を混ぜない）。
+- 単勝回収率は高オッズ的中1本で大きく振れる。的中数と的中馬のオッズ分布を確認し、単発依存かどうかを述べる。
+
+【4】時系列フィールドの意味
+- timeSplitStability の firstHalf/secondHalf は【日付順に並べた対象レースを半分に割った期間分割】。1日の中の後半レース・発走時刻・レース番号とは【無関係】。「後半レースは市場効率が高い」といった時間帯の解釈は誤り。
+
+【5】hypothesisRegistry（事前登録済みの検証中仮説）
+- 各 condition の判定基準（必要n・的中数・回収率）と current（registeredOn 以降の累積）を必ず確認する。
+- 条件未達(nが足りない)の仮説を「今すぐ実施」として再提案してはならない。再提案するなら condition 自体を変える理由を示すこと。
+- 直近に変更したパラメータは【変更後のサンプルだけ】で評価する。変更前サンプルを含む集計を根拠に、同じパラメータの再変更を提案してはならない。
+
+【6】提案前の自己チェック（内部整合性）
+- MAO係数を変える提案は「odds ≧ 係数/勝率 ⇔ EV ≧ 係数」に等価変換し、そのクラスのEV帯と矛盾しないか確認する（例: D1のEV上限は1.799なので係数1.80以上は該当馬が定義上ゼロになる）。
+- クラス境界を動かす提案は、隣接クラスとの隙間・重複、SS密度の分子(EV≧1.300)、推奨度、単勝ユニット配分への波及を必ず述べる。
+- あるクラスを削除・降格する提案は、単勝優先順位で繰り上がるクラスがどれかを述べる（削除ではなく置換になる）。
 `;
 
     // --- 共通フィールドアクセサ ---
@@ -109,7 +154,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const HYPOTHESIS_REGISTRY = [
         {
             id: 'h1', name: 'D1 MAO撤退監視', registeredOn: '2026-07-05', dataFrom: '2026-07-05', direction: '削る',
-            condition: 'D1の購入時オッズ40.0〜49.9倍帯: 累積n≧60・的中≧2・回収>100%でMAO係数を一段戻す(1.70→1.50)',
+            // 2026-07-27: MAO1.70化(EV≧1.70)以降この帯はほぼ発生せず n=2 で停滞＝監視として機能していない。h12に実質統合。
+            condition: 'D1の購入時オッズ40.0〜49.9倍帯: 累積n≧60・的中≧2・回収>100%でMAO係数を一段戻す(1.70→1.50)。※MAO1.70化で該当馬がほぼ出ず休眠中（n=2で停滞）。判定はh12と一体で行い、h12が撤退側で決着した場合は本項も終了',
             compute: rows => hypoStat(rows.filter(r => isExecutedBet(r) && clsOf(r) === 'D1' && buyOddsOf(r) >= 40.0 && buyOddsOf(r) < 50.0))
         },
         {
@@ -162,19 +208,24 @@ document.addEventListener('DOMContentLoaded', () => {
             compute: null // 手動判定（recommendationPerformance.S.refTrifecta を参照）
         },
         {
-            id: 'h11', name: 'SSS配分復帰監視', registeredOn: '2026-07-19', dataFrom: '2026-07-19', direction: '観察',
-            condition: 'live SSS: 登録日以降n≧60でSSS単勝回収がSSを上回れば専用配分(A3=6,B2=3)復活',
-            compute: null // 手動判定（レース単位recのためrows単位computeは不適）
+            id: 'h11', name: 'SSS配分復帰/撤退監視', registeredOn: '2026-07-19', dataFrom: '2026-07-19', direction: '観察',
+            // 2026-07-27改訂: R3のSSSは全レース同一ステークのため配分変更でROI%は実質不変→累計liveで判定してよい。
+            // 復帰側(片側)だけでは悪化しても永久に1Uが残るため撤退側を追加。
+            condition: '累計live SSS(R3 1点目): ①n≧50で回収がSSを上回れば専用配分(A3=6,B2=3)復活 ②n≧50かつ回収<80%ならSSSステーク1U→0U(執行SKIP)。2026-07-27時点 n=28・的中1・回収41.97%(CI 0.63〜17.71%でSSと重なり有意差なし→継続)',
+            compute: null // 手動判定（レース単位recのためrows単位computeは不適。liveOnlyView.recommendationPerformance.SSS を参照）
         },
         {
             id: 'h12', name: 'D1 MAO1.70監視', registeredOn: '2026-07-19', dataFrom: '2026-07-19', direction: '削る',
-            condition: '2026-07-19引上げ(1.50→1.70)後: n≧60・的中≧2・回収>100%で1.50へ戻す',
+            // 2026-07-27改訂: 戻す側だけだったため撤退側を追加（h2「X撤退」と同型の非対称ルール）
+            condition: '2026-07-19引上げ(1.50→1.70)後: ①n≧60・的中≧2・回収>100%で1.50へ戻す ②n≧60かつ的中0ならD1をN降格(買い目対象外) ③n≧60かつ回収<70%ならMAO 1.70→1.85。※係数はEV下限と等価(EV≧係数)でD1のEV上限=1.799、1.80以上は該当馬ゼロ',
             compute: rows => hypoStat(rows.filter(r => isExecutedBet(r) && clsOf(r) === 'D1'))
         },
         {
             id: 'h13', name: '後半ROI減衰監視', registeredOn: '2026-07-19', dataFrom: '2026-07-19', direction: '観察',
-            condition: 'liveOnlyView.timeSplitStability: 後半ROI<100%が次回サイクルも継続なら全体ユニット縮小を審議',
-            compute: null // 手動判定（timeSplitStabilityを参照）
+            // 2026-07-27改訂: timeSplitStability は全liveを半分に割る「移動窓」で、古いデータが後半窓に残り続けるため
+            // 「2サイクル連続<100%」が機械的に成立してしまう。前サイクルからの増分で判定する方式に変更。
+            condition: '前サイクルJSONからの【増分】ベットで判定する（timeSplitStabilityの後半窓は移動窓のため単独では使わない）。増分の回収率がフル配分・R3の両方で2サイクル連続<100%なら全体ユニット縮小を審議。2026-07-27実測: 44→45の増分31ベットでフル157.1%・R3 172.4%→非該当・監視継続',
+            compute: null // 手動判定（前回JSONとの差分計算）
         },
         {
             id: 'h14', name: '攻撃系序列R2監視', registeredOn: '2026-07-19', dataFrom: '2026-07-19', direction: '観察',
@@ -188,8 +239,29 @@ document.addEventListener('DOMContentLoaded', () => {
         },
         {
             id: 'h16', name: 'A2監視', registeredOn: '2026-07-19', dataFrom: '2026-07-19', direction: '削る',
-            condition: 'A2はlive回収79.1%(n=64)＋確定オッズ下落層の疑い(h7関連)。EV較正判定後、登録日以降live n≧150・単勝回収<90%でB1保留案件とセットで降格審議',
+            // 2026-07-27追記: 降格するならカットポイントは1.150ではなく1.200。ランクA帯別では1.0〜1.09が91.7%(n=53)、
+            // 1.1〜1.19が76.2%(n=39)で、1.150で切ると悪い方を残す。※この帯別はランク別=全馬集計でありA2そのものではない点に注意。
+            condition: 'A2はlive回収79.1%(n=64)＋確定オッズ下落層の疑い(h7関連)。EV較正判定後、登録日以降live n≧150・単勝回収<90%でB1(h18)とセットで降格審議。境界を動かす場合の候補値はEV下限1.200（1.150は非推奨）',
             compute: rows => hypoStat(rows.filter(r => isExecutedBet(r) && clsOf(r) === 'A2'))
+        },
+        {
+            id: 'h17', name: 'EV較正シャドー判定', registeredOn: '2026-07-27', dataFrom: '2026-07-27', direction: '観察',
+            // 旧基準「shadow.liveOnly.recoveryRate > liveOnlyView単勝回収率で切替提案可」は比較対象が誤り。
+            // 右辺はフル配分の値で、現行運用のR3ではない。かつ賭け金総額が減るとROI%は自動的に上がる。
+            condition: 'シャドー採否は【増分live】×【絶対損益】で判定する。登録日以降の増分で shadow(payout-invest) が現行R3(liveOnlyView.smallBankSimulation)を上回り、かつ的中率低下が-3pt以内、かつ防御系/SS密度/推奨度/三連複を含む全系統再シミュでR3のmaxDD非悪化——を全て満たす場合のみ本番切替を審議。2サイクル連続で下回れば計算ごと破棄。実測: 累計 shadow +22,050円(296点/的中率8.11%) vs R3 +76,710円(296点/12.50%)、44→45増分も shadow +3,250円 vs R3 +12,930円で連敗中',
+            compute: null // 手動判定（evCalibrationShadow.liveOnly と liveOnlyView.smallBankSimulation を前回JSONと差分比較）
+        },
+        {
+            id: 'h18', name: 'B1降格審議', registeredOn: '2026-07-27', dataFrom: '2026-07-19', direction: '削る',
+            // 2026-07-19の日誌で「次回サイクルで再審議」と宣言しながらレジストリ未登録だった案件を正式登録
+            condition: 'B1: EV較正判定後、live n≧200・単勝回収<90%でN降格審議（2026-07-19宣言の積み残し）。2026-07-27時点の累計liveは84.4%(n=141)・損益分岐勝率8.69%に対し実勝率9.35%でほぼ分岐点上',
+            compute: rows => hypoStat(rows.filter(r => isExecutedBet(r) && clsOf(r) === 'B1'))
+        },
+        {
+            id: 'h19', name: 'EV較正slope安定性', registeredOn: '2026-07-27', dataFrom: '2026-07-27', direction: '観察',
+            // slope単独判定が毎サイクル「要補正」を誤発報し、外部AIにEV式全面改修を提案させ続けている問題への対処
+            condition: 'winCore.slope は 0.2843→0.2288→-0.0326→-0.0051→-0.0198→0.1235 と6サイクル符号反転を繰り返し、r²は0.0001〜0.16。回帰に説明力が無く slope 単独の合否判定は無効。r²≧0.30 に達するまではH2優先則を発動させず「判定不能」として扱う。r²≧0.30が2サイクル続いた時点で slope 基準(0.85〜1.15)を再有効化',
+            compute: null // 手動判定（evCalibration.winCore.slope / r2 の推移）
         }
     ];
 
@@ -548,10 +620,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (liveWinRoiEl) {
                     const lov = computeLiveOnlyView(rowsWithRank);
                     window.latestLiveOnlyView = lov;
+                    const liveR3RoiEl = document.getElementById('stat-live-r3-roi');
                     if (lov && lov.summary) {
-                        liveWinRoiEl.textContent = `${lov.summary.overallWinRecoveryRate.toFixed(1)}% (${lov.summary.totalRaces}R)`;
+                        liveWinRoiEl.textContent = `フル ${lov.summary.overallWinRecoveryRate.toFixed(1)}% (${lov.summary.totalRaces}R)`;
+                        // 現行運用はR3(優先順位1位1点)。フル配分値と取り違えないよう並べて表示する
+                        const r3 = lov.smallBankSimulation;
+                        if (liveR3RoiEl) {
+                            liveR3RoiEl.textContent = r3
+                                ? `R3 ${r3.recoveryRate.toFixed(1)}% (${r3.betCount}点 / 損益 ${Math.round(r3.payout - r3.invest).toLocaleString()}円)`
+                                : 'R3 -';
+                        }
                     } else {
                         liveWinRoiEl.textContent = '実運用データなし';
+                        if (liveR3RoiEl) liveR3RoiEl.textContent = '-';
                     }
                 }
             } catch (e) {
@@ -2918,6 +2999,22 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
             const jsonPayload = {
+                // AIがこのJSON単体を読んでも母集団を取り違えないよう、先頭に定義を埋め込む
+                _dataDictionary: {
+                    "読み方": "フィールドごとに母集団が違う。根拠を書くときは必ず フィールド名 / n / 母集団 を明記すること",
+                    "意思決定の正": "liveOnlyView（実行フラグ記録レースのみ）。トップレベルの同名フィールドは紙上シミュレーション期間を含む全期間値で参考のみ",
+                    "liveOnlyView.smallBankSimulation": "★現行運用(R3小資金モード)そのものの成績。各レース単勝優先順位1位を1点だけ購入・ステークは推奨度連動",
+                    "liveOnlyView.smallBankSimulation.fullAllocation": "同レース群を全買い目購入した場合の仮想成績。現在は運用していない比較用",
+                    "liveOnlyView.summary.overallWinRecoveryRate": "★フル配分ベースの単勝回収率。現行運用(R3)の回収率ではないので『現行の回収率』として引用しないこと",
+                    "classPerformance / liveOnlyView.classPerformance": "購入時クラスに分類された【全馬】。壁フィルタ・単勝優先順位・R3の1点縛りは未反映。D1/XのAmber不通過は 'D1(NG)' 等に分離",
+                    "evaluationPerformance": "【評価ランク(S〜F)×EV帯】の全馬集計。クラス(A2/B2…)別ではない。クラス境界の検討には classPerformance[].evDetails を使うこと",
+                    "recommendationPerformance": "推奨度別。sampleRaces=レース数、winHitRate の分母は単勝を買ったレース数（別物）",
+                    "oddsDriftAnalysis / marginAnalysis / favoriteStructureAnalysis / equityCurveStats / surfaceDistanceAnalysis / runningStyleAnalysis / trackConditionAnalysis": "実行フラグ○のwin-Core馬のみ（フル配分で実際に買った馬）・全期間",
+                    "timeSplitStability": "★日付順に並べた対象レースを半分に割った【期間】の前半/後半。1日の後半レース・発走時刻・レース番号とは無関係",
+                    "evCalibrationShadow": "ev_cal = 0.5*EV + 0.4 のアフィン(単調)変換。レース内の序列は変わらず、実体はクラス境界の一括付け替え。slope是正効果はない",
+                    "hypothesisRegistry": "事前登録済みの検証中仮説。current は registeredOn 以降の累積。条件未達の仮説を前倒しで実施提案しないこと",
+                    "比較のルール": "ROI(%)だけで判定せず betCount / hitRate / invest / payout / 絶対損益(payout-invest) を併記し、同じ母集団・同じ配分方式どうしで比較する"
+                },
                 summary: {
                     totalRaces: totalRaces,
                     overallRecoveryRate: overallRoi,
@@ -4000,7 +4097,8 @@ document.addEventListener('DOMContentLoaded', () => {
         let md = `# SS-Analyzer Ultimate 解析レポート
 
 `;
-        md += `## 1. リスク・収支ダッシュボード（シミュレーションベース）
+        md += `## 1. リスク・収支ダッシュボード（全期間・フル配分シミュレーション／参考値）
+※以下の表1〜4はすべて【全期間（紙上シミュレーション期間を含む）】かつ【全買い目購入(フル配分)】ベース。現行運用(R3小資金モード)の実績ではない。意思決定は添付JSONの liveOnlyView を正とすること。
 `;
         md += `- 全体回収率: **${risk.roi.toFixed(1)}%**
 `;
@@ -4015,11 +4113,11 @@ document.addEventListener('DOMContentLoaded', () => {
 `;
         const tss = risk.timeSplitStability;
         const fmtHalf = (h) => h ? `ROI ${h.roi.toFixed(1)}% (n=${h.n})` : 'データなし';
-        md += `- 時系列安定性: 前半${tss && tss.firstHalf ? ` ${fmtHalf(tss.firstHalf)}` : ' データなし'} ／ 後半${tss && tss.secondHalf ? ` ${fmtHalf(tss.secondHalf)}` : ' データなし'}
+        md += `- 時系列安定性（日付順に半分ずつ分割した【期間】の前半/後半。1日の後半レースや時間帯とは無関係）: 前半${tss && tss.firstHalf ? ` ${fmtHalf(tss.firstHalf)}` : ' データなし'} ／ 後半${tss && tss.secondHalf ? ` ${fmtHalf(tss.secondHalf)}` : ' データなし'}
 
 `;
 
-        md += `## 2. クラス別詳細レポート
+        md += `## 2. クラス別詳細レポート（全期間・購入時クラスに該当する全馬ベース／実際に購入した馬の成績ではない）
 `;
         md += `| クラス | サンプル | 的中率 | 的中率95%CI | 連対率 | 複勝率 | 回収率 | EV |
 |---|---|---|---|---|---|---|---|
@@ -4031,7 +4129,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         md += `
-## 3. 推奨度別パフォーマンス（シミュレーション: SSS/SS/S/Low）
+## 3. 推奨度別パフォーマンス（全期間・フル配分シミュレーション: SSS/SS/S/Low）
 `;
         const fmtHitRateMd = (hits, total) => total > 0 ? `${(hits / total * 100).toFixed(1)}% (${hits}/${total})` : '-';
         md += `| 推奨度 | レース数 | 単勝投資 | 単勝的中率 | 単勝的中率95%CI | 単勝回収率 | 三連複投資 | 三連複的中率 | 三連複回収率 | 合算投資 | 合算回収率 |
@@ -4067,25 +4165,28 @@ document.addEventListener('DOMContentLoaded', () => {
         // 各AIのチャットに添付して渡す運用。コピーには文字数節約のためJSONを含めない。
 
         // ① 提案用（Gemini に貼る）
-        const geminiMd = reportBody + SPEC_BLOCK + `
+        const geminiMd = reportBody + SPEC_BLOCK + DATA_DICT_BLOCK + `
 ---
 ## 🟦 あなたの役割: 改善提案者（ステップ①）
 
-あなたは競馬投資モデル「SS-Engine」の定量アナリストです。上の現行仕様と実績データ、および添付JSON（ss_feedback_data.json: summary / evaluationPerformance / recommendationPerformance / densityPerformance / amberAudit / oddsBinAnalysis / classPerformance / evCalibration）に基づき、パラメータ改善案を提案してください。あなたの提案は次段階で別のAIが厳格に検証します。根拠の数値とサンプル数が無い提案はすべて却下されます。
+あなたは競馬投資モデル「SS-Engine」の定量アナリストです。上の【現行仕様】【参照データ辞書】【本文の表】、および添付JSON(ss_feedback_data.json)に基づき、パラメータ改善案を提案してください。あなたの提案は次段階で別のAIが厳格に検証します。根拠の数値・サンプル数・参照フィールド名が無い提案はすべて却下されます。
 
-【データの正】viewFilter が 'all' のJSONには紙上シミュレーション期間の上振れが混入している。JSON内に liveOnlyView があれば、回収率・クラス別成績・R3成績の判断は liveOnlyView を正とし、全期間値は参考としてのみ扱うこと。全期間値のみを根拠にした増額・緩和系の提案は禁止。
+【データの正】本文の表とJSONのトップレベル値は【全期間・フル配分】の参考値であり、紙上シミュレーション期間の上振れを含む。意思決定の正は liveOnlyView であり、現行運用(R3)の実績は liveOnlyView.smallBankSimulation。liveOnlyView.summary.overallWinRecoveryRate はフル配分の値なので「現行の回収率」として使わないこと。全期間値のみを根拠にした増額・緩和系の提案は禁止。詳細は上の【参照データ辞書】に従うこと。
 
 ### 手順（この順で実行）
-1. 【最優先・H2】evCalibration.winCore.slope を確認し、値と判定を回答の最初に宣言する（0.85〜1.15なら較正OK。範囲外なら、個別パラメータの調整より先に EV計算式＝スコア配点・予想勝率算出の補正を提案の第1候補にする。all は N等を含む参考値）。
-2. クラス別・推奨度別・EV帯別・オッズ帯別の表から、回収率が明確に高い／低いセグメントを特定する。必ずサンプル数 n を併記する。表に95%信頼区間（CI）がある場合は必ず考慮し、CIが100%を跨ぐ回収率・区間が広すぎる的中率を根拠の中心にしない。
-3. 変更すべきパラメータ（クラス境界EV、MAO係数、Amber係数、SS密度閾値、ユニット配分、三連複SKIP条件）を「現行値 → 提案値」の具体的な数値で提案する。
+1. 【最優先・H2】evCalibration.winCore の slope と r2 を確認し、判定を回答の最初に宣言する。**r2<0.30 のときは「判定不能」と宣言し、slopeの値に関わらずEV式本体の補正を提案の第1候補にしてはならない**（回帰に説明力が無く、slopeは毎サイクル符号が反転している。h19参照）。r2≧0.30 のときのみ slope 0.85〜1.15 で合否を判定し、範囲外なら個別パラメータより先にEV計算式（スコア配点・予想勝率算出）の補正を第1候補にする。all は N等を含む参考値。なお evCalibrationShadow はEVのアフィン変換にすぎず slope 是正にならない（仕様欄参照）。シャドー切替を提案する場合は仕様欄の4条件を数値で満たすことを示すこと。あわせて winCore.points の分布を見て、回収率がEVに対して単調かを述べる。
+2. まず liveOnlyView（実運用）で回収率が明確に高い／低いセグメントを特定する。全期間の表は「その傾向が期間をまたいで一貫しているか」の確認にのみ使う。必ず n・的中数・95%CIを併記し、CIが100%を跨ぐ回収率／区間が広すぎる的中率を根拠の中心にしない。
+3. hypothesisRegistry を確認し、既に登録済みの論点かどうかを判定する。未達の仮説の前倒し実施は提案しない。
+4. 変更すべきパラメータ（クラス境界EV、MAO係数、Amber係数、SS密度閾値、ユニット配分、三連複SKIP条件、R3ステーク）を「現行値 → 提案値」の具体的な数値で提案する。提案前に【参照データ辞書】6の自己チェックを必ず通す。
 
 ### 制約
 - 提案は優先度順に最大7件。それ以上は出さない。
 - n<30 のセグメントのみを根拠とする提案は原則出さない。どうしても出す場合は信頼度を「低」とし、n を明記する。
 - 数値根拠のない定性的提案・一般論は禁止。
+- 回収率(%)だけを根拠にしない。必ず【絶対損益(payout−invest)】または的中数と的中馬オッズ分布を添えて、単発高配当依存でないことを示す。
+- 直近に変更されたパラメータ（hypothesisRegistry の registeredOn が新しいもの）は、変更後サンプルのみで評価する。変更前を含む集計を根拠に再変更を提案しない。
 - 資金管理は定額フラット（1U=100円）＋1レース投入上限キャップが確定方針。ケリー比例・変動ベットの提案は禁止（上限キャップ値の調整提案は可）。
-- 現行仕様の枠外のアイデア（新指標・新データ源など）は、最後に「追加検討（仕様外）」として最大2件まで分けて書く。
+- 現行仕様の枠外のアイデア（新指標・新データ源など）は、最後に「追加検討（仕様外）」として最大2件まで分けて書く。運用手順を伴うものは betTimingAnalysis（購入は発走数分前）の制約下で実行可能かを述べること。
 - 前置き・全体要約・挨拶は不要。次の出力形式のみで回答する。
 
 ### 出力形式（厳守）
@@ -4095,30 +4196,40 @@ document.addEventListener('DOMContentLoaded', () => {
 【提案N】（信頼度: 高／中／低）
 - 対象: パラメータ名
 - 現行値 → 提案値:
-- 根拠: 参照した表・JSONフィールド名と数値（n=サンプル数 必須）
+- 参照フィールド: JSONのフルパス（例 liveOnlyView.classPerformance[B2]）／母集団（実運用 or 全期間、全馬 or 購入馬、R3 or フル配分）
+- 根拠: 数値（n=サンプル数・的中数 必須。可能なら絶対損益）
+- 既存仮説との関係: hypothesisRegistry の該当ID（無ければ「新規」）／条件達成済みか未達か
+- 整合性チェック: EV等価変換・隣接クラス・SS密度・優先順位の繰り上がりへの影響
 - 期待効果: 何がどれだけ改善する見込みか
-- 副作用リスク: 想定される悪影響
+- 副作用リスク: 想定される悪影響（的中率・連敗・DD・買い目件数）
 
 この回答全文をコピーし、次に「Claude用コピー」を貼ったClaudeチャットの末尾に貼り付けてください。
 `;
 
         // ②③ 検証・統合用（Claude に貼る）
-        const claudeMd = reportBody + SPEC_BLOCK + `
+        const claudeMd = reportBody + SPEC_BLOCK + DATA_DICT_BLOCK + `
 ---
 ## 🟧 あなたの役割: 改善案の検証者・統合者（ステップ②→③）
 
 あなたは競馬投資モデル「SS-Engine」の保守的なリスク管理者です。上の現行仕様・実績データ（添付のレース別データJSONがあればそれも）と、このメッセージ末尾に貼り付けられたGeminiの提案リストを査定してください。あなたの仕事は良い提案を通すことではなく、悪い変更からモデルを守ることです。提案の全件採用は検証の失敗とみなします。データが変更を強く支持しない限り「現状維持」が正解です。
 
-【データの正】viewFilter が 'all' のJSONには紙上シミュレーション期間の上振れが混入している。JSON内に liveOnlyView があれば、回収率・クラス別成績・R3成績の判断は liveOnlyView を正とし、全期間値は参考としてのみ扱うこと。全期間値のみを根拠にした増額・緩和系の提案は禁止。
+【データの正】本文の表とJSONのトップレベル値は【全期間・フル配分】の参考値で、紙上シミュレーション期間の上振れを含む。意思決定の正は liveOnlyView、現行運用(R3)の実績は liveOnlyView.smallBankSimulation。liveOnlyView.summary.overallWinRecoveryRate はフル配分の値であり現行の回収率ではない。全期間値のみを根拠にした増額・緩和系の提案は禁止。詳細は上の【参照データ辞書】に従うこと。
+
+【提案の根拠検算】各提案について、Geminiが挙げた数値を必ずJSONの該当フィールドで検算する。特に次の誤りは頻出なので明示的にチェックする。
+- 母集団の取り違え（R3の話にフル配分の数字／購入馬でなく全馬の集計／クラス別でなく評価ランク別の集計を使っている）
+- ROI%だけを見て絶対損益・賭け金総額・的中率の変化を見ていない
+- timeSplitStability を「1日の後半レース・時間帯」と誤読している
+- 直近変更したパラメータを、変更前サンプルを含む集計で再評価している
+- 提案されたカットポイントが、提示された隣接EV帯の数値と矛盾している
 
 【ステップ②: 検証】各提案を個別に査定する。
 判定軸:
 1. 統計的妥当性: 根拠の n は十分か（n<30は要注意、n<10は原則却下）。回収率の差はその n で偶然生じうる範囲ではないか。単勝回収率は高オッズ的中1本で大きく振れる点に特に注意する。95%CIが併記されている場合は区間で判断する（点推定の差ではなくCIの重なり・100%跨ぎを確認）。
 2. 多重比較: クラス×EV帯×オッズ帯を総当たりで眺めれば偶然の凸凹は必ず見つかる。そのセグメントに構造的な理由（オッズ市場の歪み、ロジック上の必然）を説明できない提案は割り引く。
 3. 過学習リスク: 特定期間・特定会場・特定条件への過剰適合ではないか。今後のレースにも汎化するか。
-4. 内部整合性: クラス境界の連続性（変更で隙間・重複が生じないか）、MAO／Amber／SS密度／推奨度の定義との矛盾、単勝ユニット配分との整合。
-5. 副作用: 他クラス・的中率・最大ドローダウン・買い目件数への影響。
-6. H2優先則: evCalibration.winCore.slope が 0.85〜1.15 を外れている場合、EV計算式本体の補正を最優先で扱い、個別境界の微調整は保留に回す。
+4. 内部整合性: クラス境界の連続性（変更で隙間・重複が生じないか）、MAO／Amber／SS密度／推奨度の定義との矛盾、単勝ユニット配分との整合。MAO係数の提案は「odds≧係数/勝率 ⇔ EV≧係数」に等価変換し、そのクラスのEV帯で該当馬が消滅しないか確認する。
+5. 副作用: 他クラス・的中率・最大ドローダウン・買い目件数への影響。クラスを削除・降格する提案は、単勝優先順位で繰り上がるクラス（＝実質的な置換先）の成績と、hypothesisRegistry に既存の序列検証結果があればそれを確認する。
+6. H2優先則: evCalibration.winCore の r2≧0.30 のときに限り、slope が 0.85〜1.15 を外れていればEV計算式本体の補正を最優先で扱い、個別境界の微調整は保留に回す。r2<0.30 なら「較正判定不能」とし、slopeを根拠にしたEV式改修の提案は却下する（slopeは6サイクル符号反転・r²最大0.16。h19）。
 
 各提案の判定は「採用／条件付き採用（修正内容を明記）／保留（次回データで検証。検証条件を明記）／却下」＋理由（2〜4行）。Geminiが付けた信頼度は参考にとどめ、必ず自分で元の表の数値を確認して判定する。
 
