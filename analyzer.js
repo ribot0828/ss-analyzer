@@ -170,7 +170,7 @@ document.addEventListener('DOMContentLoaded', () => {
         },
         {
             id: 'h4', name: 'B帯EV0.9-0.99', registeredOn: '2026-07-05', dataFrom: '2026-07-05', direction: '攻める',
-            condition: 'n≧150で両隣ビンと単調性が出なければ完全却下',
+            condition: 'n≧150で両隣ビンと単調性が出なければ完全却下（現ペース+10/週・到達目安2026-10下旬）',
             compute: rows => hypoStat(rows.filter(r => ratingOf(r) === 'B' && evOf(r) >= 0.9 && evOf(r) < 1.0)) // 全馬・フラット診断
         },
         {
@@ -185,7 +185,7 @@ document.addEventListener('DOMContentLoaded', () => {
         },
         {
             id: 'h7', name: 'ドリフトガード', registeredOn: '2026-07-08', dataFrom: '2026-07-08', direction: '観察',
-            condition: '確定/購入オッズ>1.25のwinCore成績を観察。n≧100で判定基準を再設計',
+            condition: '確定/購入オッズ>1.25のwinCore成績を観察。n≧100で判定基準を再設計（現ペース+9/週・到達目安2026-09中旬）。※2026-07-27時点 n=33・回収238.5%で「拡大馬は不利」仮説とは逆方向。購入は発走中央値3分前(betTimingAnalysis)のため、直前ドリフトを見て取り消す運用は現実的でない点も併せて判定すること',
             compute: rows => hypoStat(rows.filter(r => {
                 if (!isExecutedBet(r) || !MARGIN_WINCORE_CLASSES.includes(clsOf(r))) return false;
                 const ratio = oddsDriftRatioOf(r);
@@ -199,7 +199,7 @@ document.addEventListener('DOMContentLoaded', () => {
         },
         {
             id: 'h9', name: 'B2 EV1.5帯監視', registeredOn: '2026-07-12', dataFrom: '2026-07-12', direction: '削る',
-            condition: 'B2 EV1.5〜1.59帯: 登録日以降n≧100・回収率<100%継続でB2下限を1.600に引上げ',
+            condition: 'B2 EV1.5〜1.59帯: 登録日以降n≧100・回収率<100%継続でB2下限を1.600に引上げ（現ペース+4/週・到達目安2027-01）。※B2全体は実運用150.4%(n=97)・的中11本が10.0〜16.2倍に均等分布＝単発依存なし。到達前の前倒し実施は不可',
             compute: rows => hypoStat(rows.filter(r => isExecutedBet(r) && clsOf(r) === 'B2' && evOf(r) >= 1.5 && evOf(r) < 1.6))
         },
         {
@@ -217,7 +217,7 @@ document.addEventListener('DOMContentLoaded', () => {
         {
             id: 'h12', name: 'D1 MAO1.70監視', registeredOn: '2026-07-19', dataFrom: '2026-07-19', direction: '削る',
             // 2026-07-27改訂: 戻す側だけだったため撤退側を追加（h2「X撤退」と同型の非対称ルール）
-            condition: '2026-07-19引上げ(1.50→1.70)後: ①n≧60・的中≧2・回収>100%で1.50へ戻す ②n≧60かつ的中0ならD1をN降格(買い目対象外) ③n≧60かつ回収<70%ならMAO 1.70→1.85。※係数はEV下限と等価(EV≧係数)でD1のEV上限=1.799、1.80以上は該当馬ゼロ',
+            condition: '2026-07-19引上げ(1.50→1.70)後: ①n≧60・的中≧2・回収>100%で1.50へ戻す ②n≧60かつ的中0ならD1をN降格(買い目対象外) ③n≧60かつ回収<70%ならMAO 1.70→1.85。※係数はEV下限と等価(EV≧係数)でD1のEV上限=1.799、1.80以上は該当馬ゼロ。現ペース+4/週・到達目安2026-10中旬。R3での実害は小さい（liveOnly 296点中D1の1点目採用はわずか13点＝4.4%・backtest 2026-07-27）ため優先度は低い',
             compute: rows => hypoStat(rows.filter(r => isExecutedBet(r) && clsOf(r) === 'D1'))
         },
         {
@@ -229,7 +229,8 @@ document.addEventListener('DOMContentLoaded', () => {
         },
         {
             id: 'h14', name: '攻撃系序列R2監視', registeredOn: '2026-07-19', dataFrom: '2026-07-19', direction: '観察',
-            condition: '序列R2(A3→B2→B3→D1→A2→B1)はバックテストでフル+14.1pt/R3-0.4pt・R3のDD+42U/連敗27。R3運用中は見送り。フルモード復帰時または新liveデータ再測定でR3リスク非悪化を確認できたら採用審議（backtest_v534_priority.py）',
+            // 2026-07-27 再測定済み（backtest_v534_priority_2026-07-27.py・V5'ステーク版・R0はanalyzer実測と完全一致）
+            condition: '2026-07-27再測定(live 335R/V5\'ステーク)。R3 liveOnly: R0現行 220.61%(DD78.6U/連敗24) ／ R1 228.24%(DD98.2U/連敗27) ／ R2 222.66%(DD94.2U/連敗27)。R3全期間ではR0 248.31%に対しR1 204.19%・R2 206.69%と-42〜44ptで符号反転。live優位はB3の1点目集中(93→184本)による高分散化の産物で、DD+16〜20U・連敗+3の生存性悪化を伴う → 引き続き見送り。フルモード復帰時に再審議',
             compute: null // 手動判定（バックテスト再実行で判定）
         },
         {
@@ -241,7 +242,7 @@ document.addEventListener('DOMContentLoaded', () => {
             id: 'h16', name: 'A2監視', registeredOn: '2026-07-19', dataFrom: '2026-07-19', direction: '削る',
             // 2026-07-27追記: 降格するならカットポイントは1.150ではなく1.200。ランクA帯別では1.0〜1.09が91.7%(n=53)、
             // 1.1〜1.19が76.2%(n=39)で、1.150で切ると悪い方を残す。※この帯別はランク別=全馬集計でありA2そのものではない点に注意。
-            condition: 'A2はlive回収79.1%(n=64)＋確定オッズ下落層の疑い(h7関連)。EV較正判定後、登録日以降live n≧150・単勝回収<90%でB1(h18)とセットで降格審議。境界を動かす場合の候補値はEV下限1.200（1.150は非推奨）',
+            condition: 'A2はlive回収79.1%(n=64)＋確定オッズ下落層の疑い(h7関連)。EV較正判定後、登録日以降live n≧150・単勝回収<90%でB1(h18)とセットで降格審議（現ペース+8/週・到達目安2026-11下旬）。境界を動かす場合の候補値はEV下限1.200（1.150は非推奨）',
             compute: rows => hypoStat(rows.filter(r => isExecutedBet(r) && clsOf(r) === 'A2'))
         },
         {
@@ -252,7 +253,8 @@ document.addEventListener('DOMContentLoaded', () => {
             compute: null // 手動判定（evCalibrationShadow.liveOnly と liveOnlyView.smallBankSimulation を前回JSONと差分比較）
         },
         {
-            id: 'h18', name: 'B1降格審議', registeredOn: '2026-07-27', dataFrom: '2026-07-19', direction: '削る',
+            // dataFromはlive開始日。B1のロジックは未変更のため累計liveで判定してよい（変更後サンプル限定は不要）
+            id: 'h18', name: 'B1降格審議', registeredOn: '2026-07-27', dataFrom: '2026-04-11', direction: '削る',
             // 2026-07-19の日誌で「次回サイクルで再審議」と宣言しながらレジストリ未登録だった案件を正式登録
             condition: 'B1: EV較正判定後、live n≧200・単勝回収<90%でN降格審議（2026-07-19宣言の積み残し）。2026-07-27時点の累計liveは84.4%(n=141)・損益分岐勝率8.69%に対し実勝率9.35%でほぼ分岐点上',
             compute: rows => hypoStat(rows.filter(r => isExecutedBet(r) && clsOf(r) === 'B1'))
