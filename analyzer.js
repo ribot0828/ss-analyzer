@@ -47,8 +47,16 @@ document.addEventListener('DOMContentLoaded', () => {
     // 「統合」CSVエクスポート用ヘッダー（既存列+新規列。既存列の並び・内容は変更しない）
     const EXPECTED_HEADERS_WITH_NEW = EXPECTED_HEADERS.concat(NEW_OPTIONAL_COLUMNS);
 
+    // 馬場状態の表記ゆれ吸収（2026-08-02）。エンジン側CSVに1文字切り詰め値が混入するため取込時に正規化する
+    const TRACK_CONDITION_ALIASES = { "稍": "稍重", "不": "不良" };
+
+    // 三連複を執行しない推奨度（v5.34: SSのみ執行）。買い目は参照値(refTrio*)として算出だけ続ける。
+    // simulateRace の skipTrio 判定と表示側の「（参照: xx%）」表示は必ずこの1箇所を見ること
+    // （2026-08-02以前は表示側にSSSが漏れており、SSSだけ参照値が出ていなかった）
+    const TRIO_SKIP_RECS = ['SSS', 'S', 'Low'];
+
     // ロジック仕様サマリー。エンジンのロジック変更時は本文と SPEC_UPDATED を必ずセットで更新すること
-    const SPEC_UPDATED = "2026-07-27";
+    const SPEC_UPDATED = "2026-08-02";
     const SPEC_BLOCK = `
 ---
 ### ◤ SS-Engine 現行仕様（前提）◢
@@ -73,7 +81,7 @@ document.addEventListener('DOMContentLoaded', () => {
 - 半減ルール: ダート1401m以上 または 重賞 は単勝ユニット max(1, floor(基本値/2))
 - R3小資金モード（現行運用）: 単勝優先順位1位の1点のみ購入。ステークは推奨度連動 SS=3U ／ SSS・S=1U ／ Low=0
 - EV較正の合否判定(H2): slope は r²≧0.30 のときだけ有効。r²<0.30 なら回帰に説明力が無いため【判定不能】とし、slopeの値に関わらずEV式本体の補正を最優先扱いにしない（実績: slope は 0.2843→0.2288→-0.0326→-0.0051→-0.0198→0.1235 と6サイクル符号反転、r²は0.0001〜0.16。h19参照）
-- evCalibrationShadow: EV較正候補(市場ブレンドα=0.5)のシャドー成績。式は p_cal=0.5*p+0.5*(0.8/odds) ⇔ ev_cal = 0.5*EV + 0.4 の【アフィン(単調)変換】であり、レース内の馬の序列は変わらない＝実体は全クラス境界の一括付け替え。よって「較正でslopeが直る／序列が改善する」という主張は成立しない（slopeは1/0.5倍になるだけ）
+- evCalibrationShadow: 【2026-08-02に廃止。JSONに出力されない】市場ブレンド較正(α=0.5)は p_cal=0.5*p+0.5*(0.8/odds) ⇔ ev_cal = 0.5*EV + 0.4 の【アフィン(単調)変換】であり、レース内の馬の序列は変わらない＝実体は全クラス境界の一括付け替え。「較正でslopeが直る／序列が改善する」という主張は原理的に成立しない（slopeは1/0.5倍になるだけ）。実測でも2サイクル連続で現行R3の絶対損益に劣後したため破棄済み（h17）。同種の提案を再提示しないこと
 - 較正切替を提案してよい条件（全て必須）: ①liveOnly n≧300 ②【絶対損益(payout−invest)】が現行R3運用(liveOnlyView.smallBankSimulation)を上回る ③的中率の低下が現行比 −3pt以内 ④防御系(B0+/S0等)・SS密度・推奨度・三連複への影響を含めた全系統の再シミュレーションでR3のmaxDDが悪化しない
 `;
 
@@ -91,7 +99,7 @@ document.addEventListener('DOMContentLoaded', () => {
 - liveOnlyView.smallBankSimulation.fullAllocation … 同じレース群を「全買い目購入」した場合の仮想成績。現在は運用していない比較用。
 - liveOnlyView.summary.overallWinRecoveryRate … ↑fullAllocation と同じ母集団の単勝回収率。★これは現行運用(R3)の回収率ではない。「現行の回収率」と呼んではいけない。
 - liveOnlyView.classPerformance … 実運用レースのクラス別成績。ただし【2】の通り「そのクラスに分類された全馬」であって購入馬ではない。
-- liveOnlyView.recommendationPerformance … 推奨度別。sampleRaces はレース数、winHitRate の分母は単勝を買ったレース数（別物なので混同しない）。
+- liveOnlyView.recommendationPerformance … 推奨度別。sampleRaces はレース数、winHitRate の分母は単勝を買ったレース数（別物なので混同しない）。三連複は現行SSのみ執行のため SSS/S/Low の trifecta* は常に0（trifectaSkipped=true）＝「買って外した」ではない。仮に買った場合の成績は refTrifectaRecoveryRate / refTrifectaHits / refTrifectaBetRaces を見る。
 - トップレベルの同名フィールド(summary / classPerformance / smallBankSimulation …)は全期間値。参考のみ。全期間値だけを根拠にした増額・緩和系の提案は禁止。
 
 【2】母集団の違い（最頻出の誤読）
@@ -249,8 +257,8 @@ document.addEventListener('DOMContentLoaded', () => {
             id: 'h17', name: 'EV較正シャドー判定', registeredOn: '2026-07-27', dataFrom: '2026-07-27', direction: '観察',
             // 旧基準「shadow.liveOnly.recoveryRate > liveOnlyView単勝回収率で切替提案可」は比較対象が誤り。
             // 右辺はフル配分の値で、現行運用のR3ではない。かつ賭け金総額が減るとROI%は自動的に上がる。
-            condition: 'シャドー採否は【増分live】×【絶対損益】で判定する。登録日以降の増分で shadow(payout-invest) が現行R3(liveOnlyView.smallBankSimulation)を上回り、かつ的中率低下が-3pt以内、かつ防御系/SS密度/推奨度/三連複を含む全系統再シミュでR3のmaxDD非悪化——を全て満たす場合のみ本番切替を審議。2サイクル連続で下回れば計算ごと破棄。実測: 累計 shadow +22,050円(296点/的中率8.11%) vs R3 +76,710円(296点/12.50%)、44→45増分も shadow +3,250円 vs R3 +12,930円で連敗中',
-            compute: null // 手動判定（evCalibrationShadow.liveOnly と liveOnlyView.smallBankSimulation を前回JSONと差分比較）
+            condition: 'シャドー採否は【増分live】×【絶対損益】で判定する。2サイクル連続で下回れば計算ごと破棄 → 【2026-08-02 破棄実施・計算削除】。実測: 44→45増分 shadow +3,250円 vs R3 +12,930円、45→46増分 shadow +1,800円(32点/1的中) vs R3 +10,230円(26点/3的中)で2サイクル連続下回りが確定。累計でも shadow +23,850円(328点/7.62%) vs R3 +86,940円(322点/12.42%)。再開はh19のr²≧0.30が2サイクル連続した場合に限り再設計のうえ再登録する',
+            compute: null // 決着済み（2026-08-02にevCalibrationShadowの計算・出力・UIパネルを削除）
         },
         {
             // dataFromはlive開始日。B1のロジックは未変更のため累計liveで判定してよい（変更後サンプル限定は不要）
@@ -367,6 +375,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 const mBaba = (normalizedRow["コース詳細"] || "").match(/馬場:([^\s/]+)/);
                 if (mBaba) normalizedRow["馬場状態"] = mBaba[1];
             }
+            // 2026-08-02: エンジン側CSVに1文字に切り詰められた値（"稍" / "不"）が混入しており、
+            // computeTrackConditionAnalysis の CONDS に一致せず excluded に落ちて集計から脱落していた
+            // （2026-08-02のCSVで 稍=285行・不=101行。稍重の実n が172→223と約22%過少になっていた）。
+            // 根治はss-engine-v2側の出力修正だが、過去CSVも読めるようアナライザー側で正規化する。
+            normalizedRow["馬場状態"] = TRACK_CONDITION_ALIASES[normalizedRow["馬場状態"]] || normalizedRow["馬場状態"];
             // 天候も同様に「コース詳細」からフォールバック
             if (normalizedRow["天候"] === "-") {
                 const mWeather = (normalizedRow["コース詳細"] || "").match(/天候:([^\s/]+)/);
@@ -641,19 +654,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 console.error('liveOnly dashboard tile error:', e);
             }
 
-            // 2026-07-19: EV較正シャドーを解析時にも計算しUIパネル表示（本番集計は不変）
-            try {
-                const shadowRaceMap = {};
-                (rowsWithRank || []).forEach(r => {
-                    const id = getRaceId(r);
-                    if (!shadowRaceMap[id]) shadowRaceMap[id] = [];
-                    shadowRaceMap[id].push(r);
-                });
-                window.latestEvShadow = computeEvShadow(shadowRaceMap, buildLiveRaceIdSet());
-                renderEvShadowPanel(window.latestEvShadow, window.latestLiveOnlyView, riskStats);
-            } catch (e) {
-                console.error('evShadow panel error:', e);
-            }
+            // 2026-08-02: EV較正シャドー（市場ブレンドα=0.5）はh17の破棄条件成立につき削除。
+            // 2サイクル連続で現行R3の絶対損益を下回った（45→46増分 shadow +1,800円 vs R3 +10,230円）。
+            // 経緯と再開条件は HYPOTHESIS_REGISTRY の h17 / h19 を参照。
 
             const outliers = detectOutliers(rowsWithRank);
 
@@ -801,7 +804,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // [8][9] 単勝ロット適正化（推奨度×クラス）
     // 2026-07-19: SSS列をSS水準へ縮小（live SSS回収64.8%/n=29。h11復帰条件あり）
-    // simulateRace と computeEvShadow の双方から参照する共通テーブル/関数（挙動は変更前と同一）
+    // simulateRace から参照する共通テーブル/関数（旧EV較正シャドーとの共有用に抽出したもの。挙動は抽出前と同一）
     const UNIT_TABLE = {
         'A3': { SSS: 5, SS: 5, S: 5, Low: 0 },
         'B2': { SSS: 2, SS: 2, S: 2, Low: 0 }, // [9]
@@ -823,7 +826,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return base;
     }
 
-    // simulateRace 内の単勝払戻決定ロジック（本来の挙動を維持したまま関数抽出。computeEvShadow と共有）
+    // simulateRace 内の単勝払戻決定ロジック（本来の挙動を維持したまま関数抽出）
     function buildRacePayouts(raceHorses) {
         const dateStr = (raceHorses[0] && raceHorses[0]["日付"]) ? raceHorses[0]["日付"].trim() : "";
         const forceRecalculateWin = dateStr === "Legacy" || dateStr === "" || dateStr < "2026-04-05";
@@ -876,7 +879,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const minDensity = isGraded ? 0.100 : 0.150;
         const rec = determineRecommendation(raceHorses);
         const baseSkipTrio = !hasAxis || density < minDensity;
-        const skipTrio = baseSkipTrio || rec === 'SSS' || rec === 'S' || rec === 'Low';
+        const skipTrio = baseSkipTrio || TRIO_SKIP_RECS.includes(rec);
 
         // 【攻撃ソート関数】EV差が0.100以内なら馬番が小さい方（内枠）を優先、それ以外はEV低を優先
         const attackSort = (a, b) => {
@@ -1080,138 +1083,6 @@ document.addEventListener('DOMContentLoaded', () => {
         };
     }
 
-    // --- EV較正シャドー並走（変更D・2026-07-19） ---
-    // 目的: winCoreでEVと実回収が無相関(slope=-0.0198, n=1146)のため、市場ブレンド較正候補を
-    // 並走記録のみで評価する。本番の買い目・集計（simulateRaceの通常呼び出し）は一切変更しない。
-    // p_cal = 0.5*p_model + 0.5*(0.8/odds); ev_cal = p_cal*odds (=0.5*EV+0.4)
-    function computeEvShadow(raceMap, liveIds) {
-        const shadowTransform = ({ winRate, ev, odds }) => {
-            const marketRate = odds > 0 ? (0.8 / odds) : 0;
-            const winRateShadow = 0.5 * winRate + 0.5 * marketRate;
-            const evShadow = Math.floor(winRateShadow * odds * 1000 + 1e-9) / 1000; // truncateTo3相当
-            return { winRate: winRateShadow, ev: evShadow };
-        };
-
-        // 生の行データからシャローコピーしてシミュレーション（本番行オブジェクトの enrich 済み
-        // プロパティ（購入時クラス・購入時期待値・amberPass等）は enrichHorses が代入する
-        // 新規/既存の「トップレベルプロパティ」のみのため、{...h} のシャローコピーで本番行を汚染しない）。
-        const shadowRaces = Object.keys(raceMap).map(id => {
-            const cloned = raceMap[id].map(h => ({ ...h }));
-            return simulateRace(cloned, id, shadowTransform);
-        });
-
-        function aggregate(races) {
-            let betCount = 0, invest = 0, payout = 0, hits = 0;
-            const classMap = {};
-
-            races.forEach(race => {
-                if (race.rec === 'Low') return; // rec==='Low'は0
-                const { winPayoutMap } = buildRacePayouts(race.horses);
-
-                (race.finalWinBets || []).forEach(h => {
-                    const cls = clsOf(h);
-                    const units = getWinUnits(cls, race.rec, race.horses[0]);
-                    if (units <= 0) return;
-                    const bInvest = units * 100;
-                    let bPayout = 0;
-                    const isHit = finishOf(h) === 1;
-                    if (isHit) {
-                        const umaban = h["馬番"];
-                        bPayout = winPayoutMap[umaban] ? winPayoutMap[umaban] * units : (oddsOf(h)) * 100 * units;
-                    }
-
-                    betCount += 1;
-                    invest += bInvest;
-                    payout += bPayout;
-                    if (isHit) hits += 1;
-
-                    if (!classMap[cls]) classMap[cls] = { cls, n: 0, hits: 0, invest: 0, payout: 0 };
-                    classMap[cls].n += 1;
-                    classMap[cls].invest += bInvest;
-                    classMap[cls].payout += bPayout;
-                    if (isHit) classMap[cls].hits += 1;
-                });
-            });
-
-            const classPerformance = Object.values(classMap).map(c => ({
-                cls: c.cls,
-                n: c.n,
-                hits: c.hits,
-                recoveryRate: c.invest > 0 ? (c.payout / c.invest) * 100 : 0
-            }));
-
-            return {
-                betCount,
-                invest,
-                payout,
-                recoveryRate: invest > 0 ? (payout / invest) * 100 : 0,
-                hitRate: betCount > 0 ? (hits / betCount) * 100 : 0,
-                classPerformance
-            };
-        }
-
-        const liveShadowRaces = shadowRaces.filter(r => r.horses && r.horses[0] && liveIds.has(getRaceId(r.horses[0])));
-
-        return {
-            formula: 'p_cal = 0.5*p_model + 0.5*(0.8/odds); ev_cal = p_cal*odds (=0.5*EV+0.4)',
-            alpha: 0.5,
-            takeout: 0.8,
-            note: 'シャドー並走。本番執行は現行EVのまま。live n≧150で現行liveOnlyViewと比較し、上回らなければ破棄(h14…登録なし、次回査定で判断)',
-            allPeriod: aggregate(shadowRaces),
-            liveOnly: aggregate(liveShadowRaces)
-        };
-    }
-
-    // --- EV較正シャドー UIパネル（2026-07-19） ---
-    function renderEvShadowPanel(shadow, lov, riskStats) {
-        const area = document.getElementById('evShadowArea');
-        if (!area) return;
-        if (!shadow) {
-            area.innerHTML = `<p class="text-sm text-slate-400">シャドー計算エラー（コンソール参照）</p>`;
-            return;
-        }
-        const fmt = (v, d = 1) => (v === null || v === undefined || !isFinite(v)) ? '-' : v.toFixed(d);
-        const curAllRoi = riskStats ? riskStats.overallWinRecoveryRate : null;
-        const curLiveRoi = (lov && lov.summary) ? lov.summary.overallWinRecoveryRate : null;
-        const liveDiff = (curLiveRoi !== null && shadow.liveOnly) ? shadow.liveOnly.recoveryRate - curLiveRoi : null;
-        const roiCell = (v) => `<td class="${(v ?? 0) >= 100 ? 'text-green-400 font-bold' : 'text-red-400'}">${fmt(v)}%</td>`;
-        const row = (label, s, curRoi) => `
-            <tr>
-                <td class="font-bold">${label}</td>
-                <td>${s ? s.betCount : '-'}</td>
-                <td>${s ? Math.round(s.invest).toLocaleString() + '円' : '-'}</td>
-                <td>${s ? Math.round(s.payout).toLocaleString() + '円' : '-'}</td>
-                ${roiCell(s ? s.recoveryRate : null)}
-                <td>${s ? fmt(s.hitRate) + '%' : '-'}</td>
-                ${roiCell(curRoi)}
-            </tr>`;
-        const clsRows = ((shadow.liveOnly && shadow.liveOnly.classPerformance) || [])
-            .slice().sort((a, b) => b.n - a.n)
-            .map(c => `<tr><td>${c.cls}</td><td>${c.n}</td><td>${c.hits}</td>${roiCell(c.recoveryRate)}</tr>`).join('');
-        area.innerHTML = `
-            <div class="overflow-x-auto">
-                <table class="analysis-table w-full text-sm">
-                    <thead><tr><th>シャドー成績</th><th>ベット数</th><th>投資</th><th>払戻</th><th>単勝回収率</th><th>的中率</th><th>（参考）現行回収率</th></tr></thead>
-                    <tbody>
-                        ${row('全期間', shadow.allPeriod, curAllRoi)}
-                        ${row('実運用（判定対象）', shadow.liveOnly, curLiveRoi)}
-                    </tbody>
-                </table>
-            </div>
-            <p class="text-sm mt-2 ${liveDiff !== null && liveDiff > 0 ? 'text-green-400' : 'text-slate-300'}">
-                実運用でのシャドー vs 現行: <span class="font-bold">${liveDiff !== null ? (liveDiff >= 0 ? '+' : '') + fmt(liveDiff) + 'pt' : '-'}</span>
-                （シャドー ${shadow.liveOnly ? fmt(shadow.liveOnly.recoveryRate) : '-'}% / 現行 ${fmt(curLiveRoi)}%）
-            </p>
-            <details class="mt-3">
-                <summary class="text-sm text-slate-400 cursor-pointer">シャドー実運用のクラス別内訳（n順）</summary>
-                <div class="overflow-x-auto mt-2">
-                    <table class="analysis-table w-full text-sm">
-                        <thead><tr><th>クラス</th><th>n</th><th>的中</th><th>回収率</th></tr></thead>
-                        <tbody>${clsRows || ''}</tbody>
-                    </table>
-                </div>
-            </details>`;
-    }
 
     // --- 小資金モード(R3)シミュレーション ---
     // 残高2万円未満時の運用ルール（ss-engine-v2 バックテストR3採用・2026-07-09導入）を
@@ -1819,9 +1690,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     </thead>
                     <tbody>
                         ${stats.map(s => {
-                            const isSkippedTrio = (s.rec === 'S' || s.rec === 'Low');
+                            const isSkippedTrio = TRIO_SKIP_RECS.includes(s.rec);
                             const trioLabel = isSkippedTrio && s.refTrioInvest > 0
-                                ? `<span class="text-slate-500" title="参照値（実際はスキップ）">（参照: ${s.refTrioROI.toFixed(1)}%）</span>`
+                                ? `<span class="text-slate-500" title="参照値（実際はスキップ）: 投資${s.refTrioInvest.toLocaleString()}円 / 的中${s.refTrioHits}件・${s.refTrioBetRaces}レース">（参照: ${s.refTrioROI.toFixed(1)}% ・ ${s.refTrioHits}/${s.refTrioBetRaces}）</span>`
                                 : '';
                             return `
                             <tr>
@@ -2717,7 +2588,12 @@ document.addEventListener('DOMContentLoaded', () => {
                         trifectaHitRate: rs?.trioBetRaces > 0 ? (rs.trioHits / rs.trioBetRaces) * 100 : 0.0,
                         refTrifectaRecoveryRate: rs?.refTrioROI || 0.0,
                         refTrifectaHitRate: rs?.refTrioBetRaces > 0 ? (rs.refTrioHits / rs.refTrioBetRaces) * 100 : 0.0,
-                        refTrifectaInvest: rs?.refTrioInvest || 0
+                        refTrifectaInvest: rs?.refTrioInvest || 0,
+                        // 2026-08-02追加: h10「S三連複再開監視(n≧100)」の n と的中数がJSONから読めず判定不能だったため出力
+                        refTrifectaBetRaces: rs?.refTrioBetRaces || 0,
+                        refTrifectaHits: rs?.refTrioHits || 0,
+                        // 未執行(SSS/S/Low)なら true。trifecta* が0なのは「買って外した」ではなくSKIPの意
+                        trifectaSkipped: TRIO_SKIP_RECS.includes(rec)
                     };
                 }
             });
@@ -3010,10 +2886,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     "liveOnlyView.summary.overallWinRecoveryRate": "★フル配分ベースの単勝回収率。現行運用(R3)の回収率ではないので『現行の回収率』として引用しないこと",
                     "classPerformance / liveOnlyView.classPerformance": "購入時クラスに分類された【全馬】。壁フィルタ・単勝優先順位・R3の1点縛りは未反映。D1/XのAmber不通過は 'D1(NG)' 等に分離",
                     "evaluationPerformance": "【評価ランク(S〜F)×EV帯】の全馬集計。クラス(A2/B2…)別ではない。クラス境界の検討には classPerformance[].evDetails を使うこと",
-                    "recommendationPerformance": "推奨度別。sampleRaces=レース数、winHitRate の分母は単勝を買ったレース数（別物）",
+                    "recommendationPerformance": "推奨度別。sampleRaces=レース数、winHitRate の分母は単勝を買ったレース数（別物）。三連複は現行SSのみ執行のため、SSS/S/Low の trifecta* は常に0で『買って外した』ではない。仮に買っていた場合の成績は refTrifecta*（SSS/S/Lowすべてで算出）を見ること",
                     "oddsDriftAnalysis / marginAnalysis / favoriteStructureAnalysis / equityCurveStats / surfaceDistanceAnalysis / runningStyleAnalysis / trackConditionAnalysis": "実行フラグ○のwin-Core馬のみ（フル配分で実際に買った馬）・全期間",
                     "timeSplitStability": "★日付順に並べた対象レースを半分に割った【期間】の前半/後半。1日の後半レース・発走時刻・レース番号とは無関係",
-                    "evCalibrationShadow": "ev_cal = 0.5*EV + 0.4 のアフィン(単調)変換。レース内の序列は変わらず、実体はクラス境界の一括付け替え。slope是正効果はない",
+                    "evCalibrationShadow": "【2026-08-02に廃止・出力なし】市場ブレンド較正はev_cal=0.5*EV+0.4のアフィン(単調)変換でレース内の序列が変わらず、実体はクラス境界の一括付け替えにすぎなかった。実測でも2サイクル連続で現行R3の絶対損益を下回ったため破棄。同種の『EV較正で序列/slopeが改善する』という提案は再提示しないこと",
                     "hypothesisRegistry": "事前登録済みの検証中仮説。current は registeredOn 以降の累積。条件未達の仮説を前倒しで実施提案しないこと",
                     "比較のルール": "ROI(%)だけで判定せず betCount / hitRate / invest / payout / 絶対損益(payout-invest) を併記し、同じ母集団・同じ配分方式どうしで比較する"
                 },
@@ -3052,22 +2928,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     winCore: window.latestCalibration.winCore || null,
                     all: window.latestCalibration.all || null
                 } : null,
-                // 変更D(2026-07-19): EV較正候補（市場ブレンドα=0.5）のシャドー並走成績。本番執行・上記evCalibrationは非汚染。
-                evCalibrationShadow: (() => {
-                    try {
-                        const shadowRaceMap = {};
-                        (rowsWithRank || []).forEach(r => {
-                            const id = getRaceId(r);
-                            if (!shadowRaceMap[id]) shadowRaceMap[id] = [];
-                            shadowRaceMap[id].push(r);
-                        });
-                        const shadowLiveIds = buildLiveRaceIdSet();
-                        return computeEvShadow(shadowRaceMap, shadowLiveIds);
-                    } catch (e) {
-                        console.error('evCalibrationShadow error:', e);
-                        return null;
-                    }
-                })(),
+                // evCalibrationShadow は2026-08-02にh17の破棄条件成立（2サイクル連続で現行R3の絶対損益を下回り）
+                // により削除。フィールドごと出力しない。再開条件は hypothesisRegistry の h17 を参照。
                 // 評価ランク別キャリブレーション検証: 勝率モデル（score/totalScore）の予測勝率と実勝率の乖離
                 rankCalibration: (calibrationStats || []).map(s => ({
                     rank: s.rank,
@@ -4138,7 +4000,19 @@ document.addEventListener('DOMContentLoaded', () => {
 |---|---|---|---|---|---|---|---|---|---|---|
 `;
         recStats.forEach(s => {
-            md += `| ${s.rec} | ${s.raceCount} | ${s.winInvest.toLocaleString()}円 | ${fmtHitRateMd(s.winHits, s.winBetRaces)} | ${fmtCIPct(s.winRateCI95)} | ${s.winROI.toFixed(1)}% | ${s.trioInvest.toLocaleString()}円 | ${fmtHitRateMd(s.trioHits, s.trioBetRaces)} | ${s.trioROI.toFixed(1)}% | ${s.totalInvest.toLocaleString()}円 | ${s.totalROI.toFixed(1)}% |
+            // 三連複を執行しない推奨度(SSS/S/Low)は投資0・回収0だけだと「買って外した」と誤読されるため、
+            // 仮に買っていた場合の参照値(refTrio*)を併記する
+            const skipped = TRIO_SKIP_RECS.includes(s.rec) && s.refTrioInvest > 0;
+            const trioRoiCell = skipped
+                ? `0.0%（未執行／参照: ${s.refTrioROI.toFixed(1)}%）`
+                : `${s.trioROI.toFixed(1)}%`;
+            const trioHitCell = skipped
+                ? `-（参照: ${fmtHitRateMd(s.refTrioHits, s.refTrioBetRaces)}）`
+                : fmtHitRateMd(s.trioHits, s.trioBetRaces);
+            const trioInvestCell = skipped
+                ? `0円（参照: ${s.refTrioInvest.toLocaleString()}円）`
+                : `${s.trioInvest.toLocaleString()}円`;
+            md += `| ${s.rec} | ${s.raceCount} | ${s.winInvest.toLocaleString()}円 | ${fmtHitRateMd(s.winHits, s.winBetRaces)} | ${fmtCIPct(s.winRateCI95)} | ${s.winROI.toFixed(1)}% | ${trioInvestCell} | ${trioHitCell} | ${trioRoiCell} | ${s.totalInvest.toLocaleString()}円 | ${s.totalROI.toFixed(1)}% |
 `;
         });
 
