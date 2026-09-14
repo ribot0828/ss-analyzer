@@ -99,6 +99,11 @@ document.addEventListener('DOMContentLoaded', () => {
 - liveOnlyView.smallBankSimulation.fullAllocation … 同じレース群を「全買い目購入」した場合の仮想成績。現在は運用していない比較用。
 - liveOnlyView.summary.overallWinRecoveryRate … ↑fullAllocation と同じ母集団の単勝回収率。★これは現行運用(R3)の回収率ではない。「現行の回収率」と呼んではいけない。
 - liveOnlyView.classPerformance … 実運用レースのクラス別成績。ただし【2】の通り「そのクラスに分類された全馬」であって購入馬ではない。
+- liveOnlyView.smallBankSimulation.classBreakdown … ★R3で【実際に購入した1点目】のクラス別成績（betCount/hits/invest/payout/pnl/recoveryRate/maxDrawdownUnits）。R3のクラス別の話は必ずここを使う。classPerformance（全馬）と混同しない。配下の evDetails=クラス内EV帯別、gateSplit=馬番1〜12／13以上、hitOdds=的中馬のオッズ一覧。
+- liveOnlyView.smallBankSimulation.recBreakdown … R3購入分の推奨度別成績（ステーク連動の検証用）。
+- liveOnlyView.smallBankSimulation.concentration … R3の払戻集中度。pnlExcludingTop1/Top3 がマイナスなら単発高配当依存。回収率を根拠にする前に必ず確認する。
+- liveOnlyView.trifectaAxisPerformance … 三連複の軸クラス別成績。executed=SSのみ執行の実績、reference=全部買った場合。防御系クラスの取捨はここで判定する。
+- liveOnlyView.r3Variants … ★R3反実仮想シミュレーション（variants / evCutSweep）。提案する変更が既にここで計測されている場合は、その deltaPnl・deltaMaxDrawdownUnits を必ず引用すること。数値を自分で推測しない。
 - liveOnlyView.recommendationPerformance … 推奨度別。sampleRaces はレース数、winHitRate の分母は単勝を買ったレース数（別物なので混同しない）。三連複は現行SSのみ執行のため SSS/S/Low の trifecta* は常に0（trifectaSkipped=true）＝「買って外した」ではない。仮に買った場合の成績は refTrifectaRecoveryRate / refTrifectaHits / refTrifectaBetRaces を見る。
 - トップレベルの同名フィールド(summary / classPerformance / smallBankSimulation …)は全期間値。参考のみ。全期間値だけを根拠にした増額・緩和系の提案は禁止。
 
@@ -111,6 +116,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
 【3】比較のルール
 - ROI(%)だけで優劣を決めない。必ず betCount / hitRate / invest / payout /【絶対損益 = payout − invest】を併記する。賭け金総額が減る変更は、ROI%が上がっても損益が減ることがある。
+- R3の変更提案は、先に liveOnlyView.r3Variants に同等の項目が無いか探す。あれば実測の deltaPnl / deltaMaxDrawdownUnits / classMix を根拠として引用する（自分で効果を推測しない）。無い場合は「未計測」と明記する。
+- r3Variants.evCutSweep はクラス×EV境界の総当たりで、良く見える点は多重比較で必ず生じる。採用するには構造的な理由と、隣接する境界でも同方向であること（単調性）を示す必要がある。
 - 比較相手は同じ母集団・同じ配分方式にそろえる（R3の話に fullAllocation の数字を混ぜない）。
 - 単勝回収率は高オッズ的中1本で大きく振れる。的中数と的中馬のオッズ分布を確認し、単発依存かどうかを述べる。
 
@@ -272,6 +279,24 @@ document.addEventListener('DOMContentLoaded', () => {
             // slope単独判定が毎サイクル「要補正」を誤発報し、外部AIにEV式全面改修を提案させ続けている問題への対処
             condition: 'winCore.slope は 0.2843→0.2288→-0.0326→-0.0051→-0.0198→0.1235 と6サイクル符号反転を繰り返し、r²は0.0001〜0.16。回帰に説明力が無く slope 単独の合否判定は無効。r²≧0.30 に達するまではH2優先則を発動させず「判定不能」として扱う。r²≧0.30が2サイクル続いた時点で slope 基準(0.85〜1.15)を再有効化',
             compute: null // 手動判定（evCalibration.winCore.slope / r2 の推移）
+        },
+        {
+            id: 'h20', name: '壁フィルター攻撃系拡張', registeredOn: '2026-09-14', dataFrom: '2026-09-14', direction: '削る',
+            // 2026-09-14査定で保留。現行の壁フィルターは防御系(A1/S2/A0)のみ。攻撃系の外枠を切るべきかを事前登録して観察する。
+            condition: '攻撃系(A3/B2/A2/D1/B1/B3)の馬番13以上: 登録日以降live n≧60・的中0かつ回収<50%のクラスから順に壁フィルターを拡張する。判定は liveOnlyView.smallBankSimulation.classBreakdown[].gateSplit.outer（R3購入分）と r3Variants の wall-* を併用し、両方でdeltaPnl>0かつDD悪化なしを必須とする。※B3は2026-09-14時点で外枠も回収率が保たれており対象外',
+            compute: rows => hypoStat(rows.filter(r => isExecutedBet(r) && ['A3', 'B2', 'A2', 'D1', 'B1', 'B3'].includes(clsOf(r)) && (parseInt(r["馬番"]) || 0) >= 13))
+        },
+        {
+            id: 'h21', name: 'B3高EV帯(3.5〜4.5)監視', registeredOn: '2026-09-14', dataFrom: '2026-09-14', direction: '観察',
+            // 2026-09-14: B3上限引下げ(4.500→3.500)提案を却下した際の監視項目。却下理由は当該帯が実運用で回収124%(n=116/的中5)だったため。
+            condition: 'B3のEV3.500〜4.500帯: 登録日以降live n≧100で的中≦2かつ回収<80%ならB3上限の引下げを審議する。的中数が少なく単発依存になりやすいため、判定時は smallBankSimulation.concentration（上位1本を除いた損益）を必ず併記すること。前倒し実施は不可',
+            compute: rows => hypoStat(rows.filter(r => isExecutedBet(r) && clsOf(r) === 'B3' && evOf(r) >= 3.500))
+        },
+        {
+            id: 'h22', name: '三連複 軸クラス別の取捨', registeredOn: '2026-09-14', dataFrom: '2026-09-14', direction: '観察',
+            // 防御系クラスの軸適性を classPerformance の複勝率ではなく三連複の実績で判定するための枠。
+            condition: '三連複の軸クラス別成績(liveOnlyView.trifectaAxisPerformance)で、executed n≧60・回収<80%が2サイクル連続したクラスは Place-Core からの除外を審議する。除外は推奨度(SS→S)とステークに波及するため、r3Variants の axis-no* で単勝側のdeltaPnlを必ず併記すること。2026-09-14時点: B0+ が executed 124R/回収63.2%で最有力、B0 は 11R と少なすぎて判定不能',
+            compute: null // 手動判定（liveOnlyView.trifectaAxisPerformance を参照。rows単位では算出できない）
         }
     ];
 
@@ -611,7 +636,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (liveSimRaces.length > 0) {
                     liveSmallBankSim = computeSmallBankSimulation(liveSimRaces);
                 }
-                renderSmallBankSimulation(smallBankSim, liveSmallBankSim);
+                // 反実仮想は意思決定の正である実運用レースで計算する（無ければ期間フィルタ適用分）
+                let r3Variants = null;
+                try {
+                    r3Variants = computeR3Variants(liveSimRaces.length > 0 ? liveSimRaces : simulatedRaces);
+                } catch (e) {
+                    console.error('R3 variants error:', e);
+                }
+                renderSmallBankSimulation(smallBankSim, liveSmallBankSim, r3Variants);
             } catch (e) {
                 console.error("Small Bank Simulation rendering error:", e);
             }
@@ -684,6 +716,50 @@ document.addEventListener('DOMContentLoaded', () => {
     const WIN_CORE_CLASSES = ['A3', 'B2', 'A2', 'B1', 'D1', 'B3'];
     const PLACE_CORE_CLASSES_FULL = ['S0', 'S1', 'S2', 'A0', 'B0+', 'A1', 'B0'];
     const AXIS_CLASSES = ['S0', 'S1', 'S2', 'A0', 'B0+', 'A1', 'B0'];
+
+    // --- 単勝選定の共通定数（simulateRace と R3反実仮想シミュレーターで共有する唯一の定義） ---
+    const WIN_PRIORITY_ORDER = ['A3', 'B2', 'A2', 'D1', 'B1', 'B3']; // 現行仕様 v5.34
+    const WALL_FILTER_CLASSES = ['A1', 'S2', 'A0'];                  // 馬番13以上を単勝候補から除外するクラス
+
+    // 【攻撃ソート】EV差が0.100以内なら馬番が小さい方（内枠）を優先、それ以外はEV低を優先
+    const ATTACK_SORT = (a, b) => {
+        const evA = evOf(a), evB = evOf(b);
+        const umA = parseInt(a["馬番"]), umB = parseInt(b["馬番"]);
+        if (Math.abs(evA - evB) <= 0.100 + 1e-9) return umA - umB;
+        return evA - evB;
+    };
+    // 【防御ソート】スコアや枠順の比較は行わず、純粋にEVが低い方を優先
+    const PURE_EV_SORT = (a, b) => evOf(a) - evOf(b);
+
+    // 単勝買い目の選定（優先順位→攻撃ソート→壁フィルター→Amber通過上位2頭）。
+    // simulateRace と computeR3Variants はどちらもこの関数だけを使うこと（選定ロジックを別実装しない）。
+    //   opts.priority : クラス優先順位（省略時は現行仕様）
+    //   opts.exclude  : (horse, cls) => true で買い目対象外にする述語（クラス除外・EV足切りの反実仮想用）
+    function selectWinBets(raceHorses, opts) {
+        const priority = (opts && opts.priority) || WIN_PRIORITY_ORDER;
+        const exclude = (opts && opts.exclude) || null;
+        const allWinCandidates = [];
+        for (const clsName of priority) {
+            const cands = raceHorses.filter(h => clsOf(h) === clsName);
+            if (cands.length === 0) continue;
+            cands.sort(ATTACK_SORT);
+            for (const h of cands) {
+                const umaban = parseInt(h["馬番"]);
+                if (umaban >= 13 && WALL_FILTER_CLASSES.includes(clsName)) continue; // 壁フィルター
+                if (exclude && exclude(h, clsName)) continue;
+                allWinCandidates.push(h);
+            }
+        }
+        // グループA：Amber通過（実購入）
+        const finalWinBets = [];
+        for (const h of allWinCandidates) {
+            if (finalWinBets.length >= 2) break;
+            if (h.amberPass) finalWinBets.push(h);
+        }
+        // グループB：Amber見送り（Amber無視なら上位2頭に入るはずだったが弾かれた馬）
+        const amberFailBets = allWinCandidates.slice(0, 2).filter(h => !h.amberPass);
+        return { finalWinBets, amberFailBets, allWinCandidates };
+    }
 
     // クラス分類・MAO・Amber判定ロジックを共通化（購入時/確定オッズどちらの評価にも使い回す）
     function classifyHorse(rating, odds, winRate, ev) {
@@ -790,11 +866,13 @@ document.addEventListener('DOMContentLoaded', () => {
         return qualifiedCount / denominator;
     }
 
-    function determineRecommendation(raceHorses) {
+    // axisClasses を差し替えると「防御系の構成を変えたら推奨度がどう動くか」を計測できる（既定は現行仕様）
+    function determineRecommendation(raceHorses, axisClasses) {
+        const axis = axisClasses || AXIS_CLASSES;
         const density = calculateSSDensity(raceHorses);
         const classes = raceHorses.map(h => clsOf(h));
         const hasS0orS1 = classes.some(c => c === 'S0' || c === 'S1');
-        const hasAxis = classes.some(c => AXIS_CLASSES.includes(c));
+        const hasAxis = classes.some(c => axis.includes(c));
 
         if (density >= 0.250 && hasS0orS1) return 'SSS';
         if (density >= 0.250 && hasAxis) return 'SS';
@@ -867,12 +945,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const classes = raceHorses.map(h => clsOf(h));
         const density = calculateSSDensity(raceHorses);
         
-        // 優先順位の定数定義（念のため関数内に明記）
-        const PLACE_CORE_CLASSES = ['S0', 'S1', 'S2', 'A0', 'B0+', 'A1', 'B0'];
-        const WIN_CORE_CLASSES = ['A3', 'B2', 'A2', 'D1', 'B1', 'B3'];
-        const WIN_PRIORITY_LOCAL = ['A3', 'B2', 'A2', 'D1', 'B1', 'B3']; // [10] D1>B1
-        const TRIO_ROW2_DEFENSE_LOCAL = ['S0', 'S1', 'S2', 'A0', 'B0+', 'A1', 'B0'];
-        const TRIO_ROW2_ATTACK_LOCAL = ['A3', 'B2', 'A2', 'D1', 'B1', 'B3']; // [10] D1>B1
+        // 優先順位の定数はモジュール共通定義を参照（選定ロジックは selectWinBets に集約）
+        const PLACE_CORE_CLASSES = PLACE_CORE_CLASSES_FULL;
+        const WIN_PRIORITY_LOCAL = WIN_PRIORITY_ORDER; // [10] D1>B1
+        const TRIO_ROW2_DEFENSE_LOCAL = PLACE_CORE_CLASSES_FULL;
+        const TRIO_ROW2_ATTACK_LOCAL = WIN_PRIORITY_ORDER; // [10] D1>B1
 
         const hasAxis = classes.some(c => PLACE_CORE_CLASSES.includes(c));
         const isGraded = raceHorses[0] && ((raceHorses[0]["グレード・頭数"] || "").includes("G") || (raceHorses[0]["グレード・頭数"] || "").includes("重賞"));
@@ -881,53 +958,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const baseSkipTrio = !hasAxis || density < minDensity;
         const skipTrio = baseSkipTrio || TRIO_SKIP_RECS.includes(rec);
 
-        // 【攻撃ソート関数】EV差が0.100以内なら馬番が小さい方（内枠）を優先、それ以外はEV低を優先
-        const attackSort = (a, b) => {
-            const evA = evOf(a);
-            const evB = evOf(b);
-            const umA = parseInt(a["馬番"]);
-            const umB = parseInt(b["馬番"]);
-            
-            if (Math.abs(evA - evB) <= 0.100 + 1e-9) {
-                return umA - umB; // 馬番が小さい方（内枠）を優先
-            } else {
-                return evA - evB; // EVが低い方を優先
-            }
-        };
+        const attackSort = ATTACK_SORT; // 三連複2列目攻撃の選定で使用
+        const pureEvSort = PURE_EV_SORT; // 軸・2列目防御の選定で使用
 
-        // 【防御ソート関数】スコアや枠順の比較は廃止し、純粋にEVが低い方を優先
-        const pureEvSort = (a, b) => {
-            const evA = evOf(a);
-            const evB = evOf(b);
-            return evA - evB;
-        };
-
-        // 【単勝シミュレーション馬選定とAmber検証用グループ分け】
-        let finalWinBets = [];
-        let amberFailBets = [];
-        
-        let allWinCandidates = [];
-        for (let clsName of WIN_PRIORITY_LOCAL) {
-            let cands = raceHorses.filter(h => clsOf(h) === clsName);
-            if (cands.length > 0) {
-                cands.sort(attackSort); // 攻撃ソート適用
-                for (let h of cands) {
-                    const umaban = parseInt(h["馬番"]);
-                    // 壁フィルター
-                    if (umaban >= 13 && ['A1', 'S2', 'A0'].includes(clsName)) continue;
-                    allWinCandidates.push(h);
-                }
-            }
-        }
-
-        // 1. グループA：Amber通過（実購入）
-        for (let h of allWinCandidates) {
-            if (finalWinBets.length >= 2) break;
-            if (h.amberPass) finalWinBets.push(h);
-        }
-
-        // 2. グループB：Amber見送り（回避した罠: Amber無視で上位2頭に入るはずだったが弾かれた馬）
-        amberFailBets = allWinCandidates.slice(0, 2).filter(h => !h.amberPass);
+        // 【単勝シミュレーション馬選定とAmber検証用グループ分け】（選定は selectWinBets に集約）
+        const winSelection = selectWinBets(raceHorses, { priority: WIN_PRIORITY_LOCAL });
+        const finalWinBets = winSelection.finalWinBets;
+        const amberFailBets = winSelection.amberFailBets;
 
         // 【三連複シミュレーション買い目選定】
         let finalTrioCombos = new Set();
@@ -1089,12 +1126,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // 過去データに適用した場合の成績を、既存の「現行フル配分」と比較する。
     // R3: 各レースの単勝優先順位リスト(finalWinBets)の先頭1点のみに3U(300円)固定でベット。
     //     買い目が無い（finalWinBetsが空）レースはノーベット扱い。資金残高推移は考慮しないフラット計測。
-    function computeSmallBankSimulation(simulatedRaces) {
-        const sortedRaces = [...simulatedRaces].sort(byRaceDateOrder);
-
-        // simulateRace内の単勝払戻決定ロジック（L738-767相当）をそのまま複製し、
-        // 指定馬の単勝払戻（1Uあたり=100円単位）を求める。独自の払戻ロジックは新設しない。
-        const derivePayoutPerUnit = (raceHorses, pick) => {
+    // simulateRace内の単勝払戻決定ロジックと同一。指定馬の単勝払戻（1Uあたり=100円単位）を返す。
+    // R3本体・反実仮想シミュレーターの両方がこの1実装だけを使う（独自の払戻ロジックを新設しない）。
+    function derivePayoutPerUnit(raceHorses, pick) {
             const dateStr = (raceHorses[0] && raceHorses[0]["日付"]) ? raceHorses[0]["日付"].trim() : "";
             const forceRecalculateWin = dateStr === "Legacy" || dateStr === "" || dateStr < "2026-04-05";
             let actualWinPayoutMap = {};
@@ -1117,7 +1151,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const umaban = pick["馬番"];
             if (actualWinPayoutMap[umaban]) return actualWinPayoutMap[umaban];
             return oddsOf(pick) * 100; // フォールバック（既存ロジックと同一）
-        };
+    }
+
+    function computeSmallBankSimulation(simulatedRaces) {
+        const sortedRaces = [...simulatedRaces].sort(byRaceDateOrder);
 
         // 損益系列から統計量を算出（betList: [{invest, payout}], 日付順ソート済み前提）
         const summarizeBets = (betList) => {
@@ -1154,6 +1191,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             return {
                 betCount: betList.length,
+                hits,
                 invest,
                 payout,
                 recoveryRate: invest > 0 ? (payout / invest) * 100 : 0,
@@ -1183,7 +1221,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (finishOf(pick) === 1) {
                 payout = derivePayoutPerUnit(r.horses, pick) * units;
             }
-            r3Bets.push({ invest, payout });
+            r3Bets.push(annotateBet({ invest, payout }, r, pick, units));
         });
 
         // --- 現行フル配分（既存ユニットテーブルベース）: winInvest>0のレースのみ ---
@@ -1192,12 +1230,306 @@ document.addEventListener('DOMContentLoaded', () => {
             .filter(r => r.winInvest > 0)
             .map(r => ({ invest: r.winInvest, payout: r.winReturn }));
 
+        // フル配分の【馬単位】ベット列。レース単位合計(winInvest/winReturn)と一致するが、
+        // クラス別内訳を出すために馬ごとに展開する（ユニット計算は simulateRace と同じ getWinUnits）。
+        const fullBetHorses = [];
+        sortedRaces.forEach(r => {
+            if (r.rec === 'Low' || !r.finalWinBets) return;
+            r.finalWinBets.forEach(h => {
+                const units = getWinUnits(clsOf(h), r.rec, r.horses[0]);
+                if (units <= 0) return;
+                const invest = units * 100;
+                const payout = finishOf(h) === 1 ? derivePayoutPerUnit(r.horses, h) * units : 0;
+                fullBetHorses.push(annotateBet({ invest, payout }, r, h, units));
+            });
+        });
+
         const r3Result = summarizeBets(r3Bets);
         r3Result.skippedRaces = skippedRaces;
+        Object.assign(r3Result, buildBetBreakdowns(r3Bets));
         r3Result.fullAllocation = summarizeBets(fullBets);
         r3Result.fullAllocation.skippedRaces = sortedRaces.length - fullBets.length;
+        r3Result.fullAllocation.classBreakdown = buildBetBreakdowns(fullBetHorses).classBreakdown;
 
         return r3Result;
+    }
+
+    // --- ベット1件のメタデータ付与（クラス別・EV帯別・推奨度別の内訳集計に使う） ---
+    function annotateBet(bet, race, horse, units) {
+        const row0 = (race.horses && race.horses[0]) || {};
+        bet.cls = clsOf(horse);
+        bet.ev = evOf(horse);
+        bet.odds = oddsOf(horse);
+        bet.buyOdds = buyOddsOf(horse);
+        bet.umaban = parseInt(horse["馬番"]) || 0;
+        bet.rec = race.rec;
+        bet.date = (row0["日付"] || "").trim();
+        bet.horseName = (horse["馬名"] || "").trim();
+        bet.units = units;
+        bet.hit = bet.payout > 0;
+        return bet;
+    }
+
+    // --- ベット列の基礎統計。ROIだけでなく絶対損益・DD・連敗を必ず併記する ---
+    function betStats(bets) {
+        let invest = 0, payout = 0, hits = 0;
+        let cum = 0, hwm = 0, maxDD = 0, streak = 0, maxStreak = 0;
+        bets.forEach(b => {
+            invest += b.invest; payout += b.payout;
+            if (b.payout > 0) { hits++; streak = 0; } else { streak++; if (streak > maxStreak) maxStreak = streak; }
+            cum += (b.payout - b.invest) / 100.0;
+            if (cum > hwm) hwm = cum;
+            if (hwm - cum > maxDD) maxDD = hwm - cum;
+        });
+        const ci = bets.length > 0 ? wilsonCI(hits, bets.length) : null;
+        return {
+            betCount: bets.length,
+            hits,
+            hitRate: bets.length > 0 ? (hits / bets.length) * 100 : 0,
+            hitRateCI95: ci ? { lo: ci.lo * 100, hi: ci.hi * 100 } : null,
+            invest,
+            payout,
+            pnl: payout - invest,
+            recoveryRate: invest > 0 ? (payout / invest) * 100 : 0,
+            maxDrawdownUnits: maxDD,
+            maxLosingStreak: maxStreak
+        };
+    }
+
+    // ネスト集計用のスリム版（CI・連敗は上位階層だけで足りるため落とす）
+    function slimStats(st) {
+        return {
+            betCount: st.betCount, hits: st.hits, hitRate: st.hitRate,
+            invest: st.invest, payout: st.payout, pnl: st.pnl, recoveryRate: st.recoveryRate
+        };
+    }
+
+    // --- ベット列の内訳一式（クラス別／クラス×EV帯／馬番帯／推奨度別／的中オッズ集中度） ---
+    // ★これは「実際に買った馬」の成績。classPerformance（クラス該当の全馬）とは母集団が違う。
+    function buildBetBreakdowns(bets) {
+        const BIN_W = 0.1;
+        const evBinLabel = (ev) => {
+            const lo = Math.floor((ev + 1e-9) / BIN_W) * BIN_W;
+            return lo.toFixed(1) + '〜' + (lo + BIN_W - 0.01).toFixed(2);
+        };
+        const byKey = (arr, keyFn) => {
+            const m = new Map();
+            arr.forEach(x => { const k = keyFn(x); if (!m.has(k)) m.set(k, []); m.get(k).push(x); });
+            return m;
+        };
+        const orderIdx = (arr, k) => { const i = arr.indexOf(k); return i === -1 ? 99 : i; };
+
+        // クラス別（＋クラス内のEV帯別・馬番帯別・的中オッズ一覧）
+        const classBreakdown = [...byKey(bets, b => b.cls || '不明').entries()]
+            .sort((a, b) => orderIdx(WIN_PRIORITY_ORDER, a[0]) - orderIdx(WIN_PRIORITY_ORDER, b[0]))
+            .map(([cls, list]) => {
+                const evDetails = [...byKey(list, b => evBinLabel(b.ev)).entries()]
+                    .sort((a, b) => parseFloat(a[0]) - parseFloat(b[0]))
+                    .map(([evBin, l]) => Object.assign({ evBin }, slimStats(betStats(l))));
+                const inner = list.filter(b => b.umaban <= 12);
+                const outer = list.filter(b => b.umaban >= 13);
+                return Object.assign({ cls }, betStats(list), {
+                    avgStakeUnits: list.length > 0 ? list.reduce((a, b) => a + b.units, 0) / list.length : 0,
+                    avgEv: list.length > 0 ? list.reduce((a, b) => a + b.ev, 0) / list.length : 0,
+                    hitOdds: list.filter(b => b.hit).map(b => Math.round(b.odds * 10) / 10).sort((x, y) => x - y),
+                    evDetails,
+                    // 壁フィルター拡張（馬番13以上を切るか）の検証用
+                    gateSplit: {
+                        inner: Object.assign({ label: '馬番1〜12' }, slimStats(betStats(inner))),
+                        outer: Object.assign({ label: '馬番13以上' }, slimStats(betStats(outer)))
+                    }
+                });
+            });
+
+        // 推奨度別（ステーク連動の効き目。h11/h15の判定に使う）
+        const recOrder = ['SSS', 'SS', 'S', 'Low'];
+        const recBreakdown = [...byKey(bets, b => b.rec || '不明').entries()]
+            .sort((a, b) => orderIdx(recOrder, a[0]) - orderIdx(recOrder, b[0]))
+            .map(([rec, list]) => Object.assign({ rec }, betStats(list)));
+
+        // 的中オッズ帯別の払戻寄与（単発高配当依存かの判定用）
+        const hits = bets.filter(b => b.hit);
+        const totalPayout = hits.reduce((a, b) => a + b.payout, 0);
+        const hitOddsDistribution = ODDS_BINS.map(bin => {
+            const l = hits.filter(b => b.odds >= bin.min && b.odds < bin.max);
+            const pay = l.reduce((a, b) => a + b.payout, 0);
+            return { band: bin.label, hits: l.length, payout: pay, payoutShare: totalPayout > 0 ? (pay / totalPayout) * 100 : 0 };
+        }).filter(x => x.hits > 0);
+
+        // 集中度: 払戻上位を除いた損益。マイナスなら単発依存と判断する
+        const sortedHits = [...hits].sort((a, b) => b.payout - a.payout);
+        const invest = bets.reduce((a, b) => a + b.invest, 0);
+        const sumTop = (k) => sortedHits.slice(0, k).reduce((a, b) => a + b.payout, 0);
+        const concentration = {
+            note: '払戻上位を除いた損益。マイナスなら単発高配当依存',
+            top1PayoutShare: totalPayout > 0 ? (sumTop(1) / totalPayout) * 100 : 0,
+            top3PayoutShare: totalPayout > 0 ? (sumTop(3) / totalPayout) * 100 : 0,
+            pnlExcludingTop1: (totalPayout - sumTop(1)) - invest,
+            pnlExcludingTop3: (totalPayout - sumTop(3)) - invest,
+            recoveryRateExcludingTop1: invest > 0 ? ((totalPayout - sumTop(1)) / invest) * 100 : 0
+        };
+        const topPayouts = sortedHits.slice(0, 5).map(b => ({
+            date: b.date, cls: b.cls, rec: b.rec, horse: b.horseName,
+            odds: b.odds, units: b.units, payout: b.payout
+        }));
+
+        return { classBreakdown, recBreakdown, hitOddsDistribution, concentration, topPayouts };
+    }
+
+    // ===== R3反実仮想シミュレーター =====================================================
+    // 「このパラメータを変えたらR3の絶対損益・最大DD・的中率がどう動いたか」を同一レース群で計測する。
+    // 選定は必ず selectWinBets を通すので、壁フィルター・攻撃ソート・Amberの扱いは本番と同一。
+    // ROI%だけで優劣を決めないため、全項目で betCount / hits / invest / payout / pnl / maxDD を返す。
+    const R3_STAKE_DEFAULT = { SSS: 1, SS: 3, S: 1, Low: 0 }; // 現行(V5' 2026-07-19〜)
+
+    function runR3Variant(sortedRaces, opt) {
+        const o = opt || {};
+        const priority = o.priority || WIN_PRIORITY_ORDER;
+        const exclude = o.exclude || null;
+        const axisClasses = o.axisClasses || null;
+        const stake = o.stake || R3_STAKE_DEFAULT;
+        const isBaselineSelection = !o.priority && !exclude;
+        const bets = [];
+        sortedRaces.forEach(r => {
+            const rec = axisClasses ? determineRecommendation(r.horses, axisClasses) : r.rec;
+            const units = stake[rec] || 0;
+            if (units <= 0) return;
+            const sel = isBaselineSelection
+                ? (r.finalWinBets || [])
+                : selectWinBets(r.horses, { priority, exclude }).finalWinBets;
+            const pick = sel[0];
+            if (!pick) return;
+            const invest = units * 100;
+            const payout = finishOf(pick) === 1 ? derivePayoutPerUnit(r.horses, pick) * units : 0;
+            bets.push(annotateBet({ invest, payout }, { rec, horses: r.horses }, pick, units));
+        });
+        return bets;
+    }
+
+    function computeR3Variants(simulatedRaces) {
+        const sortedRaces = [...simulatedRaces].sort(byRaceDateOrder);
+        const baseBets = runR3Variant(sortedRaces, {});
+        const baseStats = betStats(baseBets);
+
+        const classMixOf = (bets) => {
+            const m = {};
+            bets.forEach(b => { m[b.cls] = (m[b.cls] || 0) + 1; });
+            return m;
+        };
+        const evaluate = (key, label, opt, slim) => {
+            const bets = runR3Variant(sortedRaces, opt);
+            const st = betStats(bets);
+            const core = slim ? slimStats(st) : st;
+            return Object.assign({ key, label }, core, {
+                maxDrawdownUnits: st.maxDrawdownUnits,
+                deltaPnl: st.pnl - baseStats.pnl,
+                deltaRecoveryRate: st.recoveryRate - baseStats.recoveryRate,
+                deltaMaxDrawdownUnits: st.maxDrawdownUnits - baseStats.maxDrawdownUnits
+            }, slim ? {} : { classMix: classMixOf(bets) });
+        };
+
+        const variants = [Object.assign({ key: 'baseline', label: '現行R3(基準)' }, baseStats, {
+            deltaPnl: 0, deltaRecoveryRate: 0, deltaMaxDrawdownUnits: 0, classMix: classMixOf(baseBets)
+        })];
+
+        // 1) 単勝優先順位の入れ替え（繰り上がるクラスが何かは classMix で確認する）
+        const ORDER_VARIANTS = [
+            { key: 'order-B1B3-up', label: '順位: A3→B2→B1→B3→A2→D1', priority: ['A3', 'B2', 'B1', 'B3', 'A2', 'D1'] },
+            { key: 'order-D1-last', label: '順位: D1を最下位へ', priority: ['A3', 'B2', 'A2', 'B1', 'B3', 'D1'] },
+            { key: 'order-A2-last', label: '順位: A2を最下位へ', priority: ['A3', 'B2', 'D1', 'B1', 'B3', 'A2'] },
+            { key: 'order-B3-first', label: '順位: B3を最上位へ', priority: ['B3', 'A3', 'B2', 'A2', 'D1', 'B1'] }
+        ];
+        ORDER_VARIANTS.forEach(v => variants.push(evaluate(v.key, v.label, { priority: v.priority })));
+
+        // 2) 攻撃クラスを1つずつN降格（削除ではなく「繰り上がるクラスへの置換」になる点に注意）
+        WIN_PRIORITY_ORDER.forEach(cls => {
+            variants.push(evaluate('exclude-' + cls, cls + 'をN降格', { exclude: (h, c) => c === cls }));
+        });
+
+        // 3) 防御系(Place-Core)構成の変更 → 推奨度(SS/S)が動き、ステークが変わる
+        [['B0', 'B0'], ['S2', 'S2'], ['B0+', 'B0+']].forEach(([cls]) => {
+            variants.push(evaluate('axis-no' + cls, '軸系統から' + cls + 'を除外', {
+                axisClasses: AXIS_CLASSES.filter(c => c !== cls)
+            }));
+        });
+
+        // 4) 推奨度連動ステークの配分違い（h11/h15）
+        [
+            { key: 'stake-flat1', label: 'ステーク: 一律1U', stake: { SSS: 1, SS: 1, S: 1, Low: 0 } },
+            { key: 'stake-flat3', label: 'ステーク: 一律3U', stake: { SSS: 3, SS: 3, S: 3, Low: 0 } },
+            { key: 'stake-SSS0', label: 'ステーク: SSSを0U(執行SKIP)', stake: { SSS: 0, SS: 3, S: 1, Low: 0 } },
+            { key: 'stake-S3', label: 'ステーク: Sを3Uへ復帰', stake: { SSS: 1, SS: 3, S: 3, Low: 0 } },
+            { key: 'stake-SS-only', label: 'ステーク: SS推奨のみ購入', stake: { SSS: 0, SS: 3, S: 0, Low: 0 } }
+        ].forEach(v => variants.push(evaluate(v.key, v.label, { stake: v.stake })));
+
+        // 5) 壁フィルター(馬番13以上除外)の攻撃系への拡張
+        variants.push(evaluate('wall-attack-all', '壁フィルターを攻撃系全クラスへ拡張', {
+            exclude: (h) => (parseInt(h["馬番"]) || 0) >= 13
+        }));
+        ['D1', 'B3', 'B1', 'B2'].forEach(cls => {
+            variants.push(evaluate('wall-' + cls, '壁フィルターを' + cls + 'へ拡張', {
+                exclude: (h, c) => c === cls && (parseInt(h["馬番"]) || 0) >= 13
+            }));
+        });
+
+        // 6) EV境界スイープ: 各攻撃クラスの下限引上げ／上限引下げを0.1刻みの実在境界で総当たり
+        //    ※多重比較になりやすい。採用判断は必ず n・的中数・絶対損益・DDを併記して行うこと
+        const evCutSweep = [];
+        WIN_PRIORITY_ORDER.forEach(cls => {
+            const picks = baseBets.filter(b => b.cls === cls);
+            if (picks.length < 20) return; // 少なすぎるクラスはスイープしない
+            const bins = [...new Set(picks.map(b => Math.floor((b.ev + 1e-9) * 10) / 10))].sort((a, b) => a - b);
+            const sample = bins.length <= 6 ? bins : bins.filter((_, i) => i % Math.ceil(bins.length / 6) === 0);
+            sample.forEach(t => {
+                if (t > bins[0]) {
+                    evCutSweep.push(evaluate('evmin-' + cls + '-' + t.toFixed(1), cls + ' EV下限を' + t.toFixed(3) + 'へ引上げ',
+                        { exclude: (h, c) => c === cls && evOf(h) < t - 1e-9 }, true));
+                }
+                if (t < bins[bins.length - 1]) {
+                    evCutSweep.push(evaluate('evmax-' + cls + '-' + t.toFixed(1), cls + ' EV上限を' + (t + 0.099).toFixed(3) + 'へ引下げ',
+                        { exclude: (h, c) => c === cls && evOf(h) >= t + 0.1 - 1e-9 }, true));
+                }
+            });
+        });
+
+        return {
+            note: '同一レース群でR3の設定だけを差し替えた反実仮想。baseline との差分(deltaPnl/deltaMaxDrawdownUnits)で優劣を見る。ROI%単独で判断しないこと',
+            baselineKey: 'baseline',
+            variants,
+            evCutSweep
+        };
+    }
+
+    // ===== 三連複 軸クラス別成績 =========================================================
+    // 防御系(Place-Core)のどのクラスが軸になった三連複が機能しているかを見る。
+    // 「B0を軸から外すべきか」のような提案は classPerformance の複勝率ではなくこの表で判定する。
+    function computeTrifectaAxisPerformance(simulatedRaces) {
+        const groups = {};
+        simulatedRaces.forEach(r => {
+            if (!r.axisHorse) return;
+            const cls = clsOf(r.axisHorse) || '不明';
+            if (!groups[cls]) groups[cls] = { executed: [], reference: [] };
+            // 参照: 推奨度SKIPを無視して全て買った場合（refTrio*）
+            if (r.refTrioInvest > 0) groups[cls].reference.push({ invest: r.refTrioInvest, payout: r.refTrioReturn });
+            // 執行: 現行ルール(SSのみ執行)で実際に買った分
+            if (r.trioInvest > 0) groups[cls].executed.push({ invest: r.trioInvest, payout: r.trioReturn });
+        });
+        const summarize = (list) => {
+            const invest = list.reduce((a, b) => a + b.invest, 0);
+            const payout = list.reduce((a, b) => a + b.payout, 0);
+            const hits = list.filter(b => b.payout > 0).length;
+            return {
+                betRaces: list.length, hits,
+                hitRate: list.length > 0 ? (hits / list.length) * 100 : 0,
+                invest, payout, pnl: payout - invest,
+                recoveryRate: invest > 0 ? (payout / invest) * 100 : 0
+            };
+        };
+        return AXIS_CLASSES.filter(c => groups[c]).map(cls => ({
+            axisCls: cls,
+            executed: summarize(groups[cls].executed),
+            reference: summarize(groups[cls].reference)
+        }));
     }
 
     function wilsonCI(k, n) {
@@ -2510,7 +2842,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- 小資金モード(R3)シミュレーション UI表示 ---
-    function renderSmallBankSimulation(sim, liveSim) {
+    function renderSmallBankSimulation(sim, liveSim, variants) {
         const area = document.getElementById('derivedSmallBankSimArea');
         if (!area) return;
         if (!sim) {
@@ -2559,6 +2891,80 @@ document.addEventListener('DOMContentLoaded', () => {
                 ※R3＝各レースの単勝優先最上位1点を購入（残高2万円未満時の採用ルール・2026-07-09）。ステークは推奨度連動(SS=3U・SSS/S=1U、2026-07-19〜)。資金残高の推移は考慮しないフラット計測。
                 買い目なし（ノーベット）: 現行フル ${full.skippedRaces ?? 0}レース / R3 ${sim.skippedRaces ?? 0}レース。${liveSim ? ` 実運用のみ: 現行フル ${(liveSim.fullAllocation || {}).skippedRaces ?? 0}レース / R3 ${liveSim.skippedRaces ?? 0}レース` : ''}
             </p>
+            ${renderR3ClassBreakdown(liveSim || sim, !!liveSim)}
+            ${renderR3VariantTable(variants)}
+        `;
+    }
+
+    // R3で【実際に購入した1点目】のクラス別成績。クラス別の議論はこの表を使う（classPerformanceは全馬）。
+    function renderR3ClassBreakdown(sim, isLive) {
+        if (!sim || !sim.classBreakdown || sim.classBreakdown.length === 0) return '';
+        const c = sim.concentration || {};
+        const rows = sim.classBreakdown.map(x => `
+            <tr>
+                <td class="font-bold">${x.cls}</td>
+                <td>${x.betCount}</td>
+                <td>${x.hits} (${x.hitRate.toFixed(1)}%)</td>
+                <td>${Math.round(x.invest).toLocaleString()}円</td>
+                <td>${Math.round(x.payout).toLocaleString()}円</td>
+                <td class="${x.recoveryRate >= 100 ? 'text-green-400 font-bold' : 'text-red-400'}">${x.recoveryRate.toFixed(1)}%</td>
+                <td class="${x.pnl >= 0 ? 'text-green-400' : 'text-red-400'}">${Math.round(x.pnl).toLocaleString()}円</td>
+                <td>${x.maxDrawdownUnits.toFixed(1)}U</td>
+                <td>${x.maxLosingStreak}</td>
+                <td>${x.avgStakeUnits.toFixed(2)}U</td>
+                <td class="text-xs">${x.hitOdds.length ? x.hitOdds.join(' / ') : '-'}</td>
+            </tr>`).join('');
+        const recLine = (sim.recBreakdown || []).map(r =>
+            `${r.rec}: ${r.betCount}点・的中${r.hits}・回収${r.recoveryRate.toFixed(1)}%・損益${Math.round(r.pnl).toLocaleString()}円`).join(' ／ ');
+        return `
+            <h4 class="text-sm font-bold text-slate-200 mt-5 mb-1">R3 クラス別成績（${isLive ? '実運用レースのみ' : '期間フィルタ適用'}／実際に購入した1点目だけ）</h4>
+            <p class="text-xs text-amber-400/80 mb-2">※「クラス別詳細レポート」は該当クラスの全馬。こちらはR3で実際に買った馬だけ。母集団が違うので混同しないこと。</p>
+            <div class="overflow-x-auto">
+                <table class="analysis-table w-full text-sm">
+                    <thead><tr>
+                        <th>クラス</th><th>点数</th><th>的中</th><th>投資</th><th>払戻</th><th>回収率</th><th>損益</th><th>最大DD</th><th>最大連敗</th><th>平均ステーク</th><th>的中オッズ</th>
+                    </tr></thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>
+            <p class="text-xs text-slate-500 mt-2">推奨度別: ${recLine || '-'}</p>
+            <p class="text-xs text-slate-500">払戻集中度: 最大1本が払戻の${(c.top1PayoutShare ?? 0).toFixed(1)}%・上位3本で${(c.top3PayoutShare ?? 0).toFixed(1)}%。最大1本を除いた損益 <span class="${(c.pnlExcludingTop1 ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}">${Math.round(c.pnlExcludingTop1 ?? 0).toLocaleString()}円</span>（マイナスなら単発高配当依存）</p>
+        `;
+    }
+
+    // R3反実仮想: 損益改善が大きい順に上位、悪化が大きい順に下位を表示（多重比較の注意書き付き）
+    function renderR3VariantTable(variants) {
+        if (!variants || !variants.variants || variants.variants.length === 0) return '';
+        const base = variants.variants.find(v => v.key === variants.baselineKey);
+        const others = variants.variants.filter(v => v.key !== variants.baselineKey)
+            .sort((a, b) => b.deltaPnl - a.deltaPnl);
+        const row = (v, isBase) => `
+            <tr class="${isBase ? 'bg-slate-800/60' : ''}">
+                <td class="${isBase ? 'font-bold' : ''}">${v.label}</td>
+                <td>${v.betCount}</td>
+                <td>${v.hits} (${v.hitRate.toFixed(1)}%)</td>
+                <td>${Math.round(v.invest).toLocaleString()}円</td>
+                <td>${v.recoveryRate.toFixed(1)}%</td>
+                <td class="${v.pnl >= 0 ? 'text-green-400' : 'text-red-400'}">${Math.round(v.pnl).toLocaleString()}円</td>
+                <td class="${isBase ? '' : (v.deltaPnl >= 0 ? 'text-green-400 font-bold' : 'text-red-400')}">${isBase ? '-' : (v.deltaPnl >= 0 ? '+' : '') + Math.round(v.deltaPnl).toLocaleString() + '円'}</td>
+                <td>${v.maxDrawdownUnits.toFixed(1)}U</td>
+                <td class="${isBase ? '' : (v.deltaMaxDrawdownUnits <= 0 ? 'text-green-400' : 'text-red-400')}">${isBase ? '-' : (v.deltaMaxDrawdownUnits >= 0 ? '+' : '') + v.deltaMaxDrawdownUnits.toFixed(1) + 'U'}</td>
+                <td>${v.maxLosingStreak}</td>
+            </tr>`;
+        return `
+            <h4 class="text-sm font-bold text-slate-200 mt-5 mb-1">R3 反実仮想シミュレーション（実運用レース・損益改善順）</h4>
+            <p class="text-xs text-amber-400/80 mb-2">※同じレース群で設定だけ差し替えた結果。良く見える項目は多重比較でも必ず生じるので、採用には構造的な理由と隣接条件の単調性が要る。EV境界の総当たり結果はJSONの r3Variants.evCutSweep を参照。</p>
+            <div class="overflow-x-auto">
+                <table class="analysis-table w-full text-sm">
+                    <thead><tr>
+                        <th>変更内容</th><th>点数</th><th>的中</th><th>投資</th><th>回収率</th><th>損益</th><th>損益差</th><th>最大DD</th><th>DD差</th><th>最大連敗</th>
+                    </tr></thead>
+                    <tbody>
+                        ${base ? row(base, true) : ''}
+                        ${others.map(v => row(v, false)).join('')}
+                    </tbody>
+                </table>
+            </div>
         `;
     }
 
@@ -2641,7 +3047,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     placeRate: c?.top3Rate || 0.0,
                     winRecoveryRate: c?.roi || 0.0
                 })),
-                smallBankSimulation: smallBank
+                smallBankSimulation: smallBank,
+                trifectaAxisPerformance: computeTrifectaAxisPerformance(sim),
+                r3Variants: computeR3Variants(sim)
             };
         } catch (e) {
             console.error('computeLiveOnlyView error:', e);
@@ -2883,6 +3291,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     "意思決定の正": "liveOnlyView（実行フラグ記録レースのみ）。トップレベルの同名フィールドは紙上シミュレーション期間を含む全期間値で参考のみ",
                     "liveOnlyView.smallBankSimulation": "★現行運用(R3小資金モード)そのものの成績。各レース単勝優先順位1位を1点だけ購入・ステークは推奨度連動",
                     "liveOnlyView.smallBankSimulation.fullAllocation": "同レース群を全買い目購入した場合の仮想成績。現在は運用していない比較用",
+                    "smallBankSimulation.classBreakdown": "★R3で【実際に購入した1点目】のクラス別成績。classPerformance（クラス該当の全馬）とは母集団が違うので混同しないこと。evDetails=そのクラス内のEV帯別、gateSplit=馬番1〜12／13以上の別、hitOdds=的中馬の確定オッズ一覧",
+                    "smallBankSimulation.recBreakdown": "R3購入分の推奨度別成績（ステーク連動の効き目。h11/h15の判定用）",
+                    "smallBankSimulation.concentration": "R3の払戻集中度。pnlExcludingTop1/Top3 がマイナスなら単発高配当依存と判断する",
+                    "smallBankSimulation.hitOddsDistribution / topPayouts": "R3的中馬のオッズ帯分布と払戻上位5本。回収率が単発依存かの確認に使う",
+                    "smallBankSimulation.fullAllocation.classBreakdown": "フル配分で実際に購入した馬のクラス別成績（1点目に限らない）。R3の話には混ぜないこと",
+                    "trifectaAxisPerformance": "三連複の【軸馬クラス別】成績。executed=現行ルール(SSのみ執行)で実際に買った分、reference=SKIPを無視して全部買った場合。防御系クラスの取捨（例: B0を軸から外すか）はclassPerformanceの複勝率ではなくこの表で判定する",
+                    "r3Variants": "★R3反実仮想シミュレーション。同一レース群で設定だけ差し替えた結果。variants=順位入替/クラスN降格/軸構成変更/ステーク配分/壁フィルター拡張、evCutSweep=クラス別EV境界の総当たり。baselineとの差分は deltaPnl / deltaMaxDrawdownUnits。classMix は変更後に何のクラスが繰り上がったかを示す。※スイープは多重比較なので、良く見えた1点を根拠に採用しないこと",
                     "liveOnlyView.summary.overallWinRecoveryRate": "★フル配分ベースの単勝回収率。現行運用(R3)の回収率ではないので『現行の回収率』として引用しないこと",
                     "classPerformance / liveOnlyView.classPerformance": "購入時クラスに分類された【全馬】。壁フィルタ・単勝優先順位・R3の1点縛りは未反映。D1/XのAmber不通過は 'D1(NG)' 等に分離",
                     "evaluationPerformance": "【評価ランク(S〜F)×EV帯】の全馬集計。クラス(A2/B2…)別ではない。クラス境界の検討には classPerformance[].evDetails を使うこと",
@@ -2957,6 +3372,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 hypothesisRegistry: computeHypothesisRegistry(rowsWithRank),
                 // --- 小資金モード(R3)シミュレーション: 現行フル配分との比較（2026-07-09導入） ---
                 smallBankSimulation: smallBankSim || null,
+                trifectaAxisPerformance: computeTrifectaAxisPerformance(simulatedRaces),
+                // liveOnlyView 側に実運用ベースの反実仮想が入るため、重複を避けて期間フィルタが実運用のみの時だけ出す
+                r3Variants: (filterPeriod && filterPeriod.value === 'live') ? computeR3Variants(simulatedRaces) : null,
                 // --- 実運用のみビュー: viewFilterに関係なく常時併記（意思決定の正）。フィルタが実運用のみの時は本体と同一のためnull ---
                 liveOnlyView: (filterPeriod && filterPeriod.value === 'live') ? null : computeLiveOnlyView(rowsWithRank)
             };
@@ -4034,7 +4452,53 @@ document.addEventListener('DOMContentLoaded', () => {
 `;
         }
 
-        // ここまでの md = データ本体（リスク指標・クラス別・推奨度別・異常値）。両AI共通で先頭に付ける。
+        // --- 表5/表6: 実運用(liveOnly)のR3内訳。表1〜4の全期間・フル配分とは母集団が違う ---
+        try {
+            const liveIds = buildLiveRaceIdSet();
+            const liveSimRaces = (simulatedRaces || []).filter(r => r.horses && r.horses[0] && liveIds.has(getRaceId(r.horses[0])));
+            if (liveSimRaces.length > 0) {
+                const r3 = computeSmallBankSimulation(liveSimRaces);
+                md += `
+## 5. R3小資金モード クラス別成績（実運用レースのみ／★実際に購入した1点目だけの成績）
+※表2とは母集団が違う。表2は「そのクラスに分類された全馬」、この表は「R3で実際に買った馬」。R3の話はこちらを使うこと。
+R3全体: ${r3.betCount}点 / 的中${r3.hits ?? '-'}件 (${r3.hitRate.toFixed(2)}%) / 投資${Math.round(r3.invest).toLocaleString()}円 / 払戻${Math.round(r3.payout).toLocaleString()}円 / 回収率${r3.recoveryRate.toFixed(2)}% / 損益${(r3.payout - r3.invest).toLocaleString()}円 / 最大DD ${r3.maxDrawdownUnits.toFixed(1)}U / 最大連敗 ${r3.maxLosingStreak}
+`;
+                if (r3.concentration) {
+                    md += `払戻集中度: 最大1本が払戻の${r3.concentration.top1PayoutShare.toFixed(1)}% / 上位3本で${r3.concentration.top3PayoutShare.toFixed(1)}%。最大1本を除いた損益 ${Math.round(r3.concentration.pnlExcludingTop1).toLocaleString()}円（マイナスなら単発依存）
+`;
+                }
+                md += `
+| クラス | 点数 | 的中 | 的中率 | 投資 | 払戻 | 回収率 | 損益 | 最大DD | 最大連敗 | 平均U | 的中オッズ |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+`;
+                (r3.classBreakdown || []).forEach(c => {
+                    md += `| ${c.cls} | ${c.betCount} | ${c.hits} | ${c.hitRate.toFixed(1)}% | ${Math.round(c.invest).toLocaleString()}円 | ${Math.round(c.payout).toLocaleString()}円 | ${c.recoveryRate.toFixed(1)}% | ${Math.round(c.pnl).toLocaleString()}円 | ${c.maxDrawdownUnits.toFixed(1)}U | ${c.maxLosingStreak} | ${c.avgStakeUnits.toFixed(2)} | ${c.hitOdds.length ? c.hitOdds.join('/') : '-'} |
+`;
+                });
+                md += `
+推奨度別(R3購入分): ` + (r3.recBreakdown || []).map(x => `${x.rec} ${x.betCount}点/的中${x.hits}/回収${x.recoveryRate.toFixed(1)}%/損益${Math.round(x.pnl).toLocaleString()}円`).join(' ／ ') + `
+
+`;
+                const trioAxis = computeTrifectaAxisPerformance(liveSimRaces);
+                if (trioAxis.length > 0) {
+                    md += `## 6. 三連複 軸クラス別成績（実運用レースのみ）
+※防御系クラスの取捨は表2の複勝率ではなくこの表で判定する。executed=現行ルール(SSのみ執行)、参照=SKIPを無視して全部買った場合。
+| 軸クラス | 執行レース | 執行的中 | 執行回収率 | 執行損益 | 参照レース | 参照的中 | 参照回収率 |
+|---|---|---|---|---|---|---|---|
+`;
+                    trioAxis.forEach(a => {
+                        md += `| ${a.axisCls} | ${a.executed.betRaces} | ${a.executed.hits} | ${a.executed.recoveryRate.toFixed(1)}% | ${Math.round(a.executed.pnl).toLocaleString()}円 | ${a.reference.betRaces} | ${a.reference.hits} | ${a.reference.recoveryRate.toFixed(1)}% |
+`;
+                    });
+                    md += `
+`;
+                }
+            }
+        } catch (e) {
+            console.error('R3内訳セクション生成エラー:', e);
+        }
+
+        // ここまでの md = データ本体（リスク指標・クラス別・推奨度別・異常値・R3内訳）。両AI共通で先頭に付ける。
         const reportBody = md;
 
         // 詳細なレース別データは「AI分析用データ出力 (JSON)」ボタンで出力したファイルを

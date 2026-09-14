@@ -16,6 +16,15 @@
 - ロジック仕様を変更したら analyzer.js の SPEC_BLOCK と SPEC_UPDATED（仕様更新日）を必ずセットで更新する。
 - 集計フィールドの母集団定義は `DATA_DICT_BLOCK`（AIプロンプトに挿入）と `jsonPayload._dataDictionary`（JSON先頭に埋め込み）の2箇所にある。集計ロジックを変えたら両方＋SPEC_BLOCKを更新する。この辞書は外部AI（Gemini/Claude）の母集団取り違えを防ぐためのもの。
 
+## R3（小資金モード）の分析機能 — 2026-09-14追加
+- **単勝選定ロジックの唯一の実装は `selectWinBets()`**。simulateRace と反実仮想シミュレーターの両方がこれを呼ぶ。優先順位・壁フィルター・Amberの扱いを変える時はここだけを直す（選定を別実装しない）。単勝払戻の決定も `derivePayoutPerUnit()` の1実装に集約済み。
+- `smallBankSimulation.classBreakdown` … ★R3で【実際に買った1点目】のクラス別成績。`classPerformance`（クラス該当の全馬）とは母集団が違う。配下に evDetails（クラス内EV帯別）・gateSplit（馬番1〜12／13以上）・hitOdds（的中馬のオッズ一覧）。R3のクラス別の議論は必ずこちらを使う。`fullAllocation.classBreakdown` はフル配分で実際に買った馬（1点目に限らない）。
+- `smallBankSimulation.concentration` … 払戻上位1本/3本を除いた損益。マイナスなら単発高配当依存。回収率を根拠にする前に必ず確認する。`recBreakdown`（推奨度別）と `hitOddsDistribution`（的中馬のオッズ帯分布）も同階層。
+- `trifectaAxisPerformance` … 三連複の軸クラス別成績。防御系(Place-Core)クラスの取捨は複勝率ではなくこの表で判定する（h22）。executed=現行ルール(SSのみ執行)、reference=SKIPを無視して全部買った場合。
+- `r3Variants` … R3反実仮想シミュレーター。同一レース群で「優先順位入替／クラスN降格／軸構成変更／ステーク配分／壁フィルター拡張」を実測し、baseline との deltaPnl・deltaMaxDrawdownUnits・classMix を返す。`evCutSweep` はクラス×EV境界の総当たり。**多重比較になるため、良く見えた1点だけを根拠に採用しない**（構造的な理由＋隣接境界の単調性が必要）。
+- 反実仮想は実運用(liveOnly)レースで計算する。トップレベルの `r3Variants` は期間フィルタが「実運用のみ」の時だけ出力（liveOnlyView との重複回避）。
+- 検証用ハーネス: analyzer.js は DOM前提のIIFEなので、Nodeで内部関数を叩くには DOM を再帰Proxyでスタブし、末尾の `});` 直前に export 行を注入して DOMContentLoaded コールバックを手動実行する。R3全体値が公式JSON（400点/188.07%/最大DD102.4U/最大連敗32）と一致するかを回帰確認に使う。
+
 ## よくある作業
 - バックテスト・集計ロジックの変更 → `analyzer.js`（`EXPECTED_HEADERS`, `HYPOTHESIS_REGISTRY`, フィルタ・シミュレーター関数群）
 - 新パラメータの効果測定 → analyzer.jsの集計を使う。Python版バックテスト（`.secretary/research/backtest/` 配下、日付スナップショット）と二重管理になっている場合は最新スペック版か確認
