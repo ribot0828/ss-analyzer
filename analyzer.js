@@ -80,7 +80,7 @@ document.addEventListener('DOMContentLoaded', () => {
 - 単勝ユニット配分: SSS/SS/S共通(A3=5,B2=2,A2=2,B1/D1/B3=1) ／ Low(すべて0)
 - 半減ルール: ダート1401m以上 または 重賞 は単勝ユニット max(1, floor(基本値/2))
 - R3小資金モード（現行運用）: 単勝優先順位1位の1点のみ購入。ステークは推奨度連動 SS=3U ／ SSS・S=1U ／ Low=0
-- EV較正の合否判定(H2): slope は r²≧0.30 のときだけ有効。r²<0.30 なら回帰に説明力が無いため【判定不能】とし、slopeの値に関わらずEV式本体の補正を最優先扱いにしない（実績: slope は 0.2843→0.2288→-0.0326→-0.0051→-0.0198→0.1235 と6サイクル符号反転、r²は0.0001〜0.16。h19参照）
+- EV較正の合否判定(H2): slope は r²≧0.30 のときだけ有効。r²<0.30 なら回帰に説明力が無いため【判定不能】とし、slopeの値に関わらずEV式本体の補正を最優先扱いにしない（実績: slope は 0.2843→0.2288→-0.0326→-0.0051→-0.0198→0.1235→0.1255 と7サイクル符号反転、r²は0.0001〜0.1181。h19参照）
 - evCalibrationShadow: 【2026-08-02に廃止。JSONに出力されない】市場ブレンド較正(α=0.5)は p_cal=0.5*p+0.5*(0.8/odds) ⇔ ev_cal = 0.5*EV + 0.4 の【アフィン(単調)変換】であり、レース内の馬の序列は変わらない＝実体は全クラス境界の一括付け替え。「較正でslopeが直る／序列が改善する」という主張は原理的に成立しない（slopeは1/0.5倍になるだけ）。実測でも2サイクル連続で現行R3の絶対損益に劣後したため破棄済み（h17）。同種の提案を再提示しないこと
 - 較正切替を提案してよい条件（全て必須）: ①liveOnly n≧300 ②【絶対損益(payout−invest)】が現行R3運用(liveOnlyView.smallBankSimulation)を上回る ③的中率の低下が現行比 −3pt以内 ④防御系(B0+/S0等)・SS密度・推奨度・三連複への影響を含めた全系統の再シミュレーションでR3のmaxDDが悪化しない
 `;
@@ -118,6 +118,8 @@ document.addEventListener('DOMContentLoaded', () => {
 - ROI(%)だけで優劣を決めない。必ず betCount / hitRate / invest / payout /【絶対損益 = payout − invest】を併記する。賭け金総額が減る変更は、ROI%が上がっても損益が減ることがある。
 - R3の変更提案は、先に liveOnlyView.r3Variants に同等の項目が無いか探す。あれば実測の deltaPnl / deltaMaxDrawdownUnits / classMix を根拠として引用する（自分で効果を推測しない）。無い場合は「未計測」と明記する。
 - r3Variants.evCutSweep はクラス×EV境界の総当たりで、良く見える点は多重比較で必ず生じる。採用するには構造的な理由と、隣接する境界でも同方向であること（単調性）を示す必要がある。
+- ★r3Variants の deltaPnl は必ず内訳に分けて引用する。deltaDirect =「その設定変更で止めた(または増減させた)ベット自体の損益」、deltaSubstitution =「空いた枠に繰り上がった別の馬の損益」、maxAddedPayout =「繰り上がりベット中の最大払戻1本」、deltaPnlExTopAdded = deltaPnl − maxAddedPayout。deltaPnl がプラスでも deltaDirect が小さく deltaSubstitution が大半を占めるなら、それは設定の効果ではなく反実仮想の引きの良さであり採用理由にならない（実例: wall-B2 は deltaPnl +15,090円だが deltaDirect は +3,200円）。deltaPnlExTopAdded ≦ 0 の項目は単発依存として不採用。
+- 同じクラスに対する複数のvariantが【すべて同符号】になっている場合（例: B1はevmin/evmax/excludeのどれでも+）、そのスイープは「どの境界が悪いか」を区別できていない。区別できない状態で特定の1点を採用してはならない。
 - 比較相手は同じ母集団・同じ配分方式にそろえる（R3の話に fullAllocation の数字を混ぜない）。
 - 単勝回収率は高オッズ的中1本で大きく振れる。的中数と的中馬のオッズ分布を確認し、単発依存かどうかを述べる。
 
@@ -133,6 +135,14 @@ document.addEventListener('DOMContentLoaded', () => {
 - MAO係数を変える提案は「odds ≧ 係数/勝率 ⇔ EV ≧ 係数」に等価変換し、そのクラスのEV帯と矛盾しないか確認する（例: D1のEV上限は1.799なので係数1.80以上は該当馬が定義上ゼロになる）。
 - クラス境界を動かす提案は、隣接クラスとの隙間・重複、SS密度の分子(EV≧1.300)、推奨度、単勝ユニット配分への波及を必ず述べる。
 - あるクラスを削除・降格する提案は、単勝優先順位で繰り上がるクラスがどれかを述べる（削除ではなく置換になる）。
+
+【7】ランク別の構造的事実（新クラス新設・EV帯追加を提案する前に必ず読む）
+- C（スコア20）: ランク平均の較正は合っている（rankCalibration.C.ratio≒1.0）が、C の内部では EV と勝率が【逆相関】する。2026-09-16実測(live): EV0.1帯 勝率19.6% → 0.7帯 6.3% → EV1.1以上を合算(n=333) 勝率2.7%。C はモデルの情報量が市場に劣る残余バケットで、高EV帯は「市場が織り込んでいる何かをモデルが見落としている」状態。C全体の単勝回収率は live 67.9%(n=1268)／全期間 61.2%(n=1716)。
+- したがって C の単一EV帯が100%を超えても（2026-09-16時点: C 1.0帯が live 158.0%/n=74・全期間129.9%）、両隣の帯（0.9帯22.4%・1.1帯42.6%）が沈んでいる限り多重比較の凸であり、クラス新設を提案してはならない。軸(Place-Core)候補としても C 低EV帯の複勝率は36〜48%で、Place-Core最弱のA1(46.9%)以下。
+- D（スコア10）: 予想勝率が実勢の約2倍に過大（rankCalibration.D.ratio=0.60／live実測0.43）。D1の「EV1.300〜1.799」は実質EV0.6〜1.0相当であり、D帯のEVを額面どおり他クラスと比較しないこと。
+- S（スコア100）: 逆に過小（ratio=1.40／live実測1.76、actualWinRateCI95が予想勝率を除外）。ただしS1の単勝化は h24 で事前登録済み・n≧60まで前倒し不可。スコア配点そのものの変更はEV式本体の改修＝H2領域でありh19の制約下にある。
+- E/F: live勝率0.66%/0.00%。E 0.7帯が268%に見えるのは的中2本が84.6倍・116.8倍の純粋な単発。クラス化対象外。
+- 空白EV帯の実測(2026-09-16・live全馬): B 1.7〜1.999(B2とB3の隙間) は合算 n=147/8勝/回収73.7%（1.8帯は0/59）、B 0.9〜1.099 は61.1%／81.3%、A 0.9帯は72.5%(n=36)。いずれも隙間は正しく空いている。
 `;
 
     // --- 共通フィールドアクセサ ---
@@ -166,6 +176,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // 各仮説の判定は dataFrom 以降の日付の行のみを使う（後知恵防止）。
     // compute(rows) は dataFrom で絞り込み済みの行を受け取り {n, hits, recovery, note?} を返す。null は手動判定。
     // ※compute 内で参照するヘルパー（isExecutedBet 等）は後方で定義されるが、呼び出しは解析実行時のため問題ない。
+    // h23用: 攻撃系クラスの「そのクラスで最も低いEV帯」。4クラス揃って最弱という横断パターンの監視対象。
+    // B3の最下帯(2.000〜2.099)は反例側なので意図的に含めない（condition側で別途チェックする）。
+    const ATTACK_LOWEST_EV_BAND = { A3: [1.500, 1.600], B2: [1.500, 1.600], A2: [1.000, 1.100], B1: [1.100, 1.200] };
+
     const HYPOTHESIS_REGISTRY = [
         {
             id: 'h1', name: 'D1 MAO撤退監視', registeredOn: '2026-07-05', dataFrom: '2026-07-05', direction: '削る',
@@ -277,13 +291,13 @@ document.addEventListener('DOMContentLoaded', () => {
         {
             id: 'h19', name: 'EV較正slope安定性', registeredOn: '2026-07-27', dataFrom: '2026-07-27', direction: '観察',
             // slope単独判定が毎サイクル「要補正」を誤発報し、外部AIにEV式全面改修を提案させ続けている問題への対処
-            condition: 'winCore.slope は 0.2843→0.2288→-0.0326→-0.0051→-0.0198→0.1235 と6サイクル符号反転を繰り返し、r²は0.0001〜0.16。回帰に説明力が無く slope 単独の合否判定は無効。r²≧0.30 に達するまではH2優先則を発動させず「判定不能」として扱う。r²≧0.30が2サイクル続いた時点で slope 基準(0.85〜1.15)を再有効化',
+            condition: 'winCore.slope は 0.2843→0.2288→-0.0326→-0.0051→-0.0198→0.1235→0.1255 と7サイクル符号反転を繰り返し、r²は0.0001〜0.1181。回帰に説明力が無く slope 単独の合否判定は無効。r²≧0.30 に達するまではH2優先則を発動させず「判定不能」として扱う。r²≧0.30が2サイクル続いた時点で slope 基準(0.85〜1.15)を再有効化。2026-09-16実測: slope=0.1255 / r²=0.1181 / n=1560 → 判定不能(7サイクル連続)',
             compute: null // 手動判定（evCalibration.winCore.slope / r2 の推移）
         },
         {
             id: 'h20', name: '壁フィルター攻撃系拡張', registeredOn: '2026-09-14', dataFrom: '2026-09-14', direction: '削る',
             // 2026-09-14査定で保留。現行の壁フィルターは防御系(A1/S2/A0)のみ。攻撃系の外枠を切るべきかを事前登録して観察する。
-            condition: '攻撃系(A3/B2/A2/D1/B1/B3)の馬番13以上: 登録日以降live n≧60・的中0かつ回収<50%のクラスから順に壁フィルターを拡張する。判定は liveOnlyView.smallBankSimulation.classBreakdown[].gateSplit.outer（R3購入分）と r3Variants の wall-* を併用し、両方でdeltaPnl>0かつDD悪化なしを必須とする。※B3は2026-09-14時点で外枠も回収率が保たれており対象外',
+            condition: '攻撃系(A3/B2/A2/D1/B1/B3)の馬番13以上: 登録日以降live n≧60・的中0かつ回収<50%のクラスから順に壁フィルターを拡張する。判定は liveOnlyView.smallBankSimulation.classBreakdown[].gateSplit.outer（R3購入分）と r3Variants の wall-* を併用し、両方でdeltaPnl>0かつDD悪化なしを必須とする。★wall-* の判定は deltaPnl ではなく【deltaDirect】（切ったベット自体の損益）で行い、deltaPnlExTopAdded≦0 なら不採用とする: 2026-09-16の wall-B2 は deltaPnl +15,090円だが直接効果は +3,200円にすぎず、残り約11,900円は繰り上がったB3/B1の的中2本による置換効果だった。※B3は2026-09-14時点で外枠も回収率が保たれており対象外（2026-09-16再確認: B3外枠 live全馬 n=95・回収139.2%）。また「外枠不利」は一般則ではなくB2固有: B1外枠は内枠より良い（live全馬 87.9% vs 76.0%）で wall-B1 は deltaPnl -2,680円',
             compute: rows => hypoStat(rows.filter(r => isExecutedBet(r) && ['A3', 'B2', 'A2', 'D1', 'B1', 'B3'].includes(clsOf(r)) && (parseInt(r["馬番"]) || 0) >= 13))
         },
         {
@@ -299,6 +313,26 @@ document.addEventListener('DOMContentLoaded', () => {
             //                  出口を「三連複の執行フィルターでの個別SKIP」に差し替えた（閾値 n≧60・回収<80%・2サイクル連続は据え置き）。
             condition: '三連複の軸クラス別成績(liveOnlyView.trifectaAxisPerformance)で、executed n≧60・回収<80%が2サイクル連続したクラスは、まず【三連複の執行フィルターでの個別SKIP】を第一候補として審議する。Place-Core そのものからの除外は、r3Variants の axis-no* が示す単勝側の損失（2026-09-16時点: axis-noB0+ で deltaPnl -11,220円・推奨度SS→S降格によるステーク半減が原因）を上回る三連複側の改善を示せる場合に限る。判定時は三連複アーム全体の executed 合計損益も必ず併記すること（2026-09-16時点 +370円・回収100.9%＝アーム全体はほぼ収支均衡のため、最大バケットを切ると残りが単発依存になる点に注意）。B0+: 2026-09-16サイクルで executed 124R/回収63.2%＝該当1回目、2回目待ち。B0 は 11R と少なすぎて判定不能',
             compute: null // 手動判定（liveOnlyView.trifectaAxisPerformance を参照。rows単位では算出できない）
+        },
+        {
+            id: 'h23', name: '攻撃系クラス最下EV帯の横断監視', registeredOn: '2026-09-16', dataFrom: '2026-09-16', direction: '削る',
+            // 2026-09-16査定: A3/B2/A2/B1 の「そのクラスで最も低いEV帯」が4クラス揃って最弱という横断パターンを確認。
+            // 個別クラスの下限引上げを1クラスずつ摘み食い提案させないため、単一ルールとして事前登録する。
+            // evCutSweep では evmin-A3-1.6(+4,110) / evmin-B2-1.6(+8,660) / evmin-B1-1.2(+2,140) / evmin-A2-1.1(+2,510) と
+            // 4クラスすべてが同符号だが、これは横断規則性の現れでもあり多重比較の産物でもあるため、まとめて検証する。
+            condition: '攻撃系の最下EV帯(A3 1.500〜1.599 / B2 1.500〜1.599 / A2 1.000〜1.099 / B1 1.100〜1.199): 登録日以降liveで ①各クラス n≧50 ②最下帯の回収<60% ③同クラスの残りEV帯が≧100% ④B3 2.000〜2.099帯で同じ反転が起きていない、を4クラス中3クラス以上で満たしたときに限り「攻撃系クラスのEV下限を一律+0.100」を単一ルールとして審議する。個別クラス1つだけの下限引上げ提案（h9/h16/h18の候補値を含む）は本項に吸収し、単独では採用しない。採用時はSS密度の分子(EV≧1.300)・推奨度・優先順位の繰り上がりへの波及を必ず併記すること。2026-09-16時点(累計live・実行○): 4クラス合算 n=176/8的中/回収41.8%(最大1本除33.9%)、内訳 A3 n=13/40.0% ・ B2 n=71/63.0% ・ A2 n=9/0.0% ・ B1 n=83/28.6%。反例B3 2.0帯は n=51/3的中/127.5%だが最大1本を除くと59.6%。前倒し実施は不可',
+            compute: rows => hypoStat(rows.filter(r => {
+                const band = ATTACK_LOWEST_EV_BAND[clsOf(r)];
+                return isExecutedBet(r) && band && evOf(r) >= band[0] && evOf(r) < band[1];
+            }))
+        },
+        {
+            id: 'h24', name: 'S1 単勝クラス化監視', registeredOn: '2026-09-16', dataFrom: '2026-09-16', direction: '攻める',
+            // 2026-09-16査定: rankCalibration.S は ratio=1.40(live実測1.76)でスコアS=100が過小。
+            // S1(0.700〜0.999)だけが回収を保っているが live n=19 と小さく、全期間値での拡大提案は禁止のため事前登録に留める。
+            // ※スコア配点(S=100等)の変更はEV式本体の改修＝H2領域。h19のr²≧0.30が2サイクル連続するまで提案不可。
+            condition: 'S1(評価S × EV0.700〜0.999)の単勝: 登録日以降live n≧60 かつ ①単勝回収≧110% ②最大1本を除いた回収≧100% ③rankCalibration.S.ratio≧1.30 の維持、の3条件すべてを満たしたときのみ「S1をWin-Core(単勝候補)へ追加(優先順位はA3の上・ステーク1U)」を審議する。審議時は、S1がPlace-Core(軸)でもあるため同一馬が軸かつ単勝1点目になる重複と、単勝優先順位の繰り上がりへの波及を必ず述べること。S0(EV<0.700)は live 92.0%(n=46)／全期間86.7%(n=113)で対象外、S2は live n=3 で判定不能。2026-09-16時点(累計live・実行○): n=19/9的中/回収157.4%(最大1本除129.5%)、全期間 n=50/18的中/120.6%(除109.4%)。n<60での前倒し実施は不可',
+            compute: rows => hypoStat(rows.filter(r => isExecutedBet(r) && ratingOf(r) === 'S' && evOf(r) >= 0.700 && evOf(r) < 1.000))
         }
     ];
 
@@ -1392,7 +1426,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const stake = o.stake || R3_STAKE_DEFAULT;
         const isBaselineSelection = !o.priority && !exclude;
         const bets = [];
-        sortedRaces.forEach(r => {
+        sortedRaces.forEach((r, raceIdx) => {
             const rec = axisClasses ? determineRecommendation(r.horses, axisClasses) : r.rec;
             const units = stake[rec] || 0;
             if (units <= 0) return;
@@ -1403,7 +1437,9 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!pick) return;
             const invest = units * 100;
             const payout = finishOf(pick) === 1 ? derivePayoutPerUnit(r.horses, pick) * units : 0;
-            bets.push(annotateBet({ invest, payout }, { rec, horses: r.horses }, pick, units));
+            const bet = annotateBet({ invest, payout }, { rec, horses: r.horses }, pick, units);
+            bet.raceIdx = raceIdx; // baseline との突合キー（deltaPnl の内訳分解に使う）
+            bets.push(bet);
         });
         return bets;
     }
@@ -1418,20 +1454,57 @@ document.addEventListener('DOMContentLoaded', () => {
             bets.forEach(b => { m[b.cls] = (m[b.cls] || 0) + 1; });
             return m;
         };
+        // deltaPnl の内訳分解。
+        // 「外枠を切ったら +15,090円」のような数字は、切ったベットを止めた【直接効果】と、
+        // 空いた枠に繰り上がった別の馬がたまたま当たった【置換効果】の合算になっている。
+        // deltaDirect が小さく deltaSubstitution が大半を占める variant は、設定変更の効果ではなく
+        // 反実仮想の引きの良さを見ているだけなので採用してはならない（2026-09-16 wall-B2 の査定で判明）。
+        const baseByRace = new Map(baseBets.map(b => [b.raceIdx, b]));
+        const pnlOfBet = x => x ? (x.payout - x.invest) : 0;
+        const decompose = (bets) => {
+            const varByRace = new Map(bets.map(b => [b.raceIdx, b]));
+            const keys = new Set();
+            baseByRace.forEach((_, k) => keys.add(k));
+            varByRace.forEach((_, k) => keys.add(k));
+            let direct = 0, subst = 0, maxAdded = 0;
+            keys.forEach(k => {
+                const b = baseByRace.get(k), v = varByRace.get(k);
+                if (b && v && b.horseName === v.horseName) {
+                    direct += pnlOfBet(v) - pnlOfBet(b); // 同じ馬でステークだけ動いた＝直接効果
+                    return;
+                }
+                if (b) direct -= pnlOfBet(b);           // 基準で買っていたベットが消えた＝直接効果
+                if (v) {                                 // 繰り上がりで新たに現れたベット＝置換効果
+                    subst += pnlOfBet(v);
+                    if (v.payout > maxAdded) maxAdded = v.payout;
+                }
+            });
+            // direct + subst は必ず deltaPnl に一致する（差が出たら突合キーの不整合）
+            return { deltaDirect: direct, deltaSubstitution: subst, maxAddedPayout: maxAdded };
+        };
+
         const evaluate = (key, label, opt, slim) => {
             const bets = runR3Variant(sortedRaces, opt);
             const st = betStats(bets);
             const core = slim ? slimStats(st) : st;
+            const dec = decompose(bets);
+            const dPnl = st.pnl - baseStats.pnl;
             return Object.assign({ key, label }, core, {
                 maxDrawdownUnits: st.maxDrawdownUnits,
-                deltaPnl: st.pnl - baseStats.pnl,
+                deltaPnl: dPnl,
                 deltaRecoveryRate: st.recoveryRate - baseStats.recoveryRate,
-                deltaMaxDrawdownUnits: st.maxDrawdownUnits - baseStats.maxDrawdownUnits
+                deltaMaxDrawdownUnits: st.maxDrawdownUnits - baseStats.maxDrawdownUnits,
+                deltaDirect: dec.deltaDirect,
+                deltaSubstitution: dec.deltaSubstitution,
+                maxAddedPayout: dec.maxAddedPayout,
+                deltaPnlExTopAdded: dPnl - dec.maxAddedPayout
             }, slim ? {} : { classMix: classMixOf(bets) });
         };
 
         const variants = [Object.assign({ key: 'baseline', label: '現行R3(基準)' }, baseStats, {
-            deltaPnl: 0, deltaRecoveryRate: 0, deltaMaxDrawdownUnits: 0, classMix: classMixOf(baseBets)
+            deltaPnl: 0, deltaRecoveryRate: 0, deltaMaxDrawdownUnits: 0,
+            deltaDirect: 0, deltaSubstitution: 0, maxAddedPayout: 0, deltaPnlExTopAdded: 0,
+            classMix: classMixOf(baseBets)
         })];
 
         // 1) 単勝優先順位の入れ替え（繰り上がるクラスが何かは classMix で確認する）
@@ -1495,7 +1568,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         return {
-            note: '同一レース群でR3の設定だけを差し替えた反実仮想。baseline との差分(deltaPnl/deltaMaxDrawdownUnits)で優劣を見る。ROI%単独で判断しないこと',
+            note: '同一レース群でR3の設定だけを差し替えた反実仮想。baseline との差分(deltaPnl/deltaMaxDrawdownUnits)で優劣を見る。ROI%単独で判断しないこと。★deltaPnl は必ず内訳で判断する: deltaDirect=止めた(増減させた)ベット自体の損益、deltaSubstitution=空いた枠に繰り上がった別の馬の損益、deltaPnlExTopAdded=deltaPnl から繰り上がりベットの最大払戻1本を引いた値。deltaDirect が小さく deltaSubstitution が大半、または deltaPnlExTopAdded≦0 の項目は設定の効果ではなく引きの良さなので採用しないこと',
             baselineKey: 'baseline',
             variants,
             evCutSweep
@@ -4525,6 +4598,8 @@ R3全体: ${r3.betCount}点 / 的中${r3.hits ?? '-'}件 (${r3.hitRate.toFixed(2
 - 提案は優先度順に最大7件。それ以上は出さない。
 - n<30 のセグメントのみを根拠とする提案は原則出さない。どうしても出す場合は信頼度を「低」とし、n を明記する。
 - 数値根拠のない定性的提案・一般論は禁止。
+- ★hypothesisRegistry の condition が未達（nが不足しているなど）の論点は【提案N】枠に入れてはならない。回答末尾の「監視継続（未達）」欄に、ID・現在のn/必要n・現時点の数値だけを1行で列挙すること。未達の仮説を提案枠に入れた時点で、その提案は次段階で自動的に却下される。
+- ★r3Variants を根拠にする場合は deltaPnl 単独で語らない。deltaDirect / deltaSubstitution / deltaPnlExTopAdded を必ず併記し、deltaDirect が deltaPnl の大半を占めることを示す（示せないものは提案に出さない）。
 - 回収率(%)だけを根拠にしない。必ず【絶対損益(payout−invest)】または的中数と的中馬オッズ分布を添えて、単発高配当依存でないことを示す。
 - 直近に変更されたパラメータ（hypothesisRegistry の registeredOn が新しいもの）は、変更後サンプルのみで評価する。変更前を含む集計を根拠に再変更を提案しない。
 - 資金管理は定額フラット（1U=100円）＋1レース投入上限キャップが確定方針。ケリー比例・変動ベットの提案は禁止（上限キャップ値の調整提案は可）。
@@ -4545,6 +4620,12 @@ R3全体: ${r3.betCount}点 / 的中${r3.hits ?? '-'}件 (${r3.hitRate.toFixed(2
 - 期待効果: 何がどれだけ改善する見込みか
 - 副作用リスク: 想定される悪影響（的中率・連敗・DD・買い目件数）
 
+すべての提案のあと、最後に必ず次の欄を書く:
+
+監視継続（未達）:
+- h○○ 名称: n=現在値/必要値・現時点の回収率○○% → 未達のため今回は提案しない
+（該当が無ければ「なし」と書く）
+
 この回答全文をコピーし、次に「Claude用コピー」を貼ったClaudeチャットの末尾に貼り付けてください。
 `;
 
@@ -4563,11 +4644,15 @@ R3全体: ${r3.betCount}点 / 的中${r3.hits ?? '-'}件 (${r3.hitRate.toFixed(2
 - timeSplitStability を「1日の後半レース・時間帯」と誤読している
 - 直近変更したパラメータを、変更前サンプルを含む集計で再評価している
 - 提案されたカットポイントが、提示された隣接EV帯の数値と矛盾している
+- r3Variants の deltaPnl を内訳に分けずに引用している（deltaDirect / deltaSubstitution / deltaPnlExTopAdded を確認し、繰り上がった別の馬の的中を「設定変更の効果」として計上していないか。deltaDirect が小さく deltaSubstitution が大半なら、その根拠は無効）
+- 同一クラスに対する複数のvariantがすべて同符号なのに、その中の1点だけを根拠として採用している（どの境界が悪いか区別できていない）
+- 条件未達の仮説を【提案N】枠に入れている（本来は末尾の「監視継続（未達）」欄に書くべきもの。枠を間違えた提案はそれだけで却下してよい）
 
 【ステップ②: 検証】各提案を個別に査定する。
 判定軸:
 1. 統計的妥当性: 根拠の n は十分か（n<30は要注意、n<10は原則却下）。回収率の差はその n で偶然生じうる範囲ではないか。単勝回収率は高オッズ的中1本で大きく振れる点に特に注意する。95%CIが併記されている場合は区間で判断する（点推定の差ではなくCIの重なり・100%跨ぎを確認）。
-2. 多重比較: クラス×EV帯×オッズ帯を総当たりで眺めれば偶然の凸凹は必ず見つかる。そのセグメントに構造的な理由（オッズ市場の歪み、ロジック上の必然）を説明できない提案は割り引く。
+2. 多重比較: クラス×EV帯×オッズ帯を総当たりで眺めれば偶然の凸凹は必ず見つかる。そのセグメントに構造的な理由（オッズ市場の歪み、ロジック上の必然）を説明できない提案は割り引く。新クラス新設・EV帯追加の提案は、必ず【参照データ辞書】7のランク別の構造的事実（特にCランクのEV逆相関、D/Sの較正ズレ）と突き合わせること。
+2-b. 反実仮想の内訳: r3Variants を根拠にする提案は deltaDirect（設定変更で止めたベット自体の損益）と deltaSubstitution（繰り上がった別の馬の損益）を必ず分けて述べる。deltaPnlExTopAdded ≦ 0 の項目、または deltaSubstitution が deltaPnl の過半を占める項目は、設定の効果ではなく引きの良さなので不採用とする。
 3. 過学習リスク: 特定期間・特定会場・特定条件への過剰適合ではないか。今後のレースにも汎化するか。
 4. 内部整合性: クラス境界の連続性（変更で隙間・重複が生じないか）、MAO／Amber／SS密度／推奨度の定義との矛盾、単勝ユニット配分との整合。MAO係数の提案は「odds≧係数/勝率 ⇔ EV≧係数」に等価変換し、そのクラスのEV帯で該当馬が消滅しないか確認する。
 5. 副作用: 他クラス・的中率・最大ドローダウン・買い目件数への影響。クラスを削除・降格する提案は、単勝優先順位で繰り上がるクラス（＝実質的な置換先）の成績と、hypothesisRegistry に既存の序列検証結果があればそれを確認する。
