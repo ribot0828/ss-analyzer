@@ -295,7 +295,9 @@ document.addEventListener('DOMContentLoaded', () => {
         {
             id: 'h22', name: '三連複 軸クラス別の取捨', registeredOn: '2026-09-14', dataFrom: '2026-09-14', direction: '観察',
             // 防御系クラスの軸適性を classPerformance の複勝率ではなく三連複の実績で判定するための枠。
-            condition: '三連複の軸クラス別成績(liveOnlyView.trifectaAxisPerformance)で、executed n≧60・回収<80%が2サイクル連続したクラスは Place-Core からの除外を審議する。除外は推奨度(SS→S)とステークに波及するため、r3Variants の axis-no* で単勝側のdeltaPnlを必ず併記すること。2026-09-14時点: B0+ が executed 124R/回収63.2%で最有力、B0 は 11R と少なすぎて判定不能',
+            // 2026-09-16改訂: 当初の「Place-Coreから除外」は axis-noB0+ の実測で単勝側 -11,220円の巻き添えが出るため実施不能。
+            //                  出口を「三連複の執行フィルターでの個別SKIP」に差し替えた（閾値 n≧60・回収<80%・2サイクル連続は据え置き）。
+            condition: '三連複の軸クラス別成績(liveOnlyView.trifectaAxisPerformance)で、executed n≧60・回収<80%が2サイクル連続したクラスは、まず【三連複の執行フィルターでの個別SKIP】を第一候補として審議する。Place-Core そのものからの除外は、r3Variants の axis-no* が示す単勝側の損失（2026-09-16時点: axis-noB0+ で deltaPnl -11,220円・推奨度SS→S降格によるステーク半減が原因）を上回る三連複側の改善を示せる場合に限る。判定時は三連複アーム全体の executed 合計損益も必ず併記すること（2026-09-16時点 +370円・回収100.9%＝アーム全体はほぼ収支均衡のため、最大バケットを切ると残りが単発依存になる点に注意）。B0+: 2026-09-16サイクルで executed 124R/回収63.2%＝該当1回目、2回目待ち。B0 は 11R と少なすぎて判定不能',
             compute: null // 手動判定（liveOnlyView.trifectaAxisPerformance を参照。rows単位では算出できない）
         }
     ];
