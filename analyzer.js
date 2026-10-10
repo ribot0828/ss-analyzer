@@ -106,6 +106,7 @@ document.addEventListener('DOMContentLoaded', () => {
 - liveOnlyView.classPerformance … 実運用レースのクラス別成績。ただし【2】の通り「そのクラスに分類された全馬」であって購入馬ではない。
 - liveOnlyView.smallBankSimulation.classBreakdown … ★R3で【実際に購入した1点目】のクラス別成績（betCount/hits/invest/payout/pnl/recoveryRate/maxDrawdownUnits）。R3のクラス別の話は必ずここを使う。classPerformance（全馬）と混同しない。配下の evDetails=クラス内EV帯別、gateSplit=馬番1〜12／13以上、hitOdds=的中馬のオッズ一覧。
 - liveOnlyView.smallBankSimulation.recBreakdown … R3購入分の推奨度別成績（ステーク連動の検証用）。
+- liveOnlyView.smallBankSimulation.currentDrawdownUnits / currentLosingStreak … R3の現在地（直近の最高値からの下落幅U・直近の連敗数）。maxDrawdownUnits は過去最大で、今DD中かどうかはこちらで見る。
 - liveOnlyView.smallBankSimulation.concentration … R3の払戻集中度。pnlExcludingTop1/Top3 がマイナスなら単発高配当依存。回収率を根拠にする前に必ず確認する。
 - liveOnlyView.trifectaAxisPerformance … 三連複の軸クラス別成績。executed=現行ルール(SSのみ執行＋軸B0+はSKIP)の実績、reference=全部買った場合、axisRuleSkipped / axisRuleSkippedSinceChange=軸クラスSKIPだけで止めた分の仮想成績（全期間／2026-10-10以降）。maxPayout・pnlExcludingTop1=最大払戻1本と、それを除いた損益（マイナスなら単発依存）。axisCls="ALL"の行が三連複アーム全体。防御系クラスの取捨はここで判定する。★B0+の executed は2026-10-10以降の再計算では全期間0になる（ルールを過去にも適用して再シミュレーションするため）。B0+の実績を見るときは axisRuleSkipped を使うこと。
 - liveOnlyView.r3Variants … ★R3反実仮想シミュレーション（variants / evCutSweep）。提案する変更が既にここで計測されている場合は、その deltaPnl・deltaMaxDrawdownUnits を必ず引用すること。数値を自分で推測しない。
@@ -259,7 +260,7 @@ document.addEventListener('DOMContentLoaded', () => {
             id: 'h13', name: '後半ROI減衰監視', registeredOn: '2026-07-19', dataFrom: '2026-07-19', direction: '観察',
             // 2026-07-27改訂: timeSplitStability は全liveを半分に割る「移動窓」で、古いデータが後半窓に残り続けるため
             // 「2サイクル連続<100%」が機械的に成立してしまう。前サイクルからの増分で判定する方式に変更。
-            condition: '前サイクルJSONからの【増分】ベットで判定する（timeSplitStabilityの後半窓は移動窓のため単独では使わない）。増分の回収率がフル配分・R3の両方で2サイクル連続<100%なら全体ユニット縮小を審議。2026-07-27実測: 44→45の増分31ベットでフル157.1%・R3 172.4%→非該当・監視継続',
+            condition: '前サイクルJSONからの【増分】ベットで判定する（timeSplitStabilityの後半窓は移動窓のため単独では使わない）。増分の回収率がフル配分・R3の両方で2サイクル連続<100%なら全体ユニット縮小を審議。2026-07-27実測: 44→45の増分31ベットでフル157.1%・R3 172.4%→非該当・監視継続。2026-08-11: 46→47増分でR3 44.6%(−2,270円)・フル86.1%＝該当1回目。2026-10-10: (53)→(54)増分35ベットでR3 投資8,500円/払戻14,730円/+6,230円/173.3%・フル配分 7,600円/10,530円/+2,930円/138.6% → 非該当（連続は途切れた）。ただし同期間にR3最大DDが102.4U→138.4U・最大連敗32→33へ更新されている点は別途監視',
             compute: null // 手動判定（前回JSONとの差分計算）
         },
         {
@@ -1253,6 +1254,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 finalPnlUnits: cumulativeU,
                 maxDrawdownUnits: maxDDU,
                 maxLosingStreak,
+                // 2026-10-10追加: 現在地（直近の最高値からの下落幅と、直近の連敗数）。maxDDだけでは「今DD中か」が読めないため
+                currentDrawdownUnits: hwmU - cumulativeU,
+                currentLosingStreak,
                 firstHalf: summarizeHalf(betList.slice(0, halfSize)),
                 secondHalf: summarizeHalf(betList.slice(halfSize))
             };
@@ -3734,7 +3738,8 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderRiskDashboard(s) {
         document.getElementById('stat-race-count').textContent = s.raceCount;
         document.getElementById('stat-overall-roi').textContent = `${s.roi.toFixed(1)}%`;
-        document.getElementById('stat-mdd').textContent = `-${s.mdd.toLocaleString()}円 (${s.mddRate.toFixed(1)}%)`;
+        // 旧mdd(円)は計算削除済みで常に0円表示になっていたため、単勝DD(U)を表示する（2026-10-10）
+        document.getElementById('stat-mdd').textContent = `-${s.maxDrawdownUnits.toFixed(1)}U`;
         document.getElementById('stat-avg-clv').textContent = s.avgClv.toFixed(3);
         
         const winRoiEl = document.getElementById('stat-win-roi');
@@ -4503,7 +4508,7 @@ document.addEventListener('DOMContentLoaded', () => {
 `;
         md += `- 全体回収率: **${risk.roi.toFixed(1)}%**
 `;
-        md += `- 最大ドローダウン: **-${risk.mdd.toLocaleString()}円 (${risk.mddRate.toFixed(1)}%)**
+        md += `- 最大ドローダウン（単勝・フル配分）: **-${risk.maxDrawdownUnits.toFixed(1)}U**
 `;
         md += `- 平均CLV: **${risk.avgClv.toFixed(3)}**
 `;
@@ -4525,7 +4530,7 @@ document.addEventListener('DOMContentLoaded', () => {
 `;
         const fmtCIPct = (ci) => ci ? `${(ci.lo * 100).toFixed(1)}〜${(ci.hi * 100).toFixed(1)}%` : '-';
         stats.forEach(s => {
-            md += `| ${s.cls} | ${s.sample} | ${s.winRate.toFixed(1)}% (${s.wins}/${s.sample}) | ${fmtCIPct(s.winRateCI95)} | ${s.top2Rate.toFixed(1)}% (${s.top2}/${s.sample}) | ${s.top3Rate.toFixed(1)}% (${s.top3}/${s.sample}) | ${s.roi.toFixed(1)}% | ${s.avgEv.toFixed(3)} |
+            md += `| ${s.cls} | ${s.sample} | ${s.winRate.toFixed(1)}% (${s.wins}/${s.sample}) | ${fmtCIPct(s.winRateCI95)} | ${s.top2Rate.toFixed(1)}% (${s.top2}/${s.sample}) | ${s.top3Rate.toFixed(1)}% (${s.top3}/${s.sample}) | ${Number.isFinite(s.roi) ? s.roi.toFixed(1) + '%' : '-（買い目対象外）'} | ${s.avgEv.toFixed(3)} |
 `;
         });
 
@@ -4580,7 +4585,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 md += `
 ## 5. R3小資金モード クラス別成績（実運用レースのみ／★実際に購入した1点目だけの成績）
 ※表2とは母集団が違う。表2は「そのクラスに分類された全馬」、この表は「R3で実際に買った馬」。R3の話はこちらを使うこと。
-R3全体: ${r3.betCount}点 / 的中${r3.hits ?? '-'}件 (${r3.hitRate.toFixed(2)}%) / 投資${Math.round(r3.invest).toLocaleString()}円 / 払戻${Math.round(r3.payout).toLocaleString()}円 / 回収率${r3.recoveryRate.toFixed(2)}% / 損益${(r3.payout - r3.invest).toLocaleString()}円 / 最大DD ${r3.maxDrawdownUnits.toFixed(1)}U / 最大連敗 ${r3.maxLosingStreak}
+R3全体: ${r3.betCount}点 / 的中${r3.hits ?? '-'}件 (${r3.hitRate.toFixed(2)}%) / 投資${Math.round(r3.invest).toLocaleString()}円 / 払戻${Math.round(r3.payout).toLocaleString()}円 / 回収率${r3.recoveryRate.toFixed(2)}% / 損益${(r3.payout - r3.invest).toLocaleString()}円 / 最大DD ${r3.maxDrawdownUnits.toFixed(1)}U / 最大連敗 ${r3.maxLosingStreak} / 現在DD ${(r3.currentDrawdownUnits ?? 0).toFixed(1)}U / 現在の連敗 ${r3.currentLosingStreak ?? 0}
 `;
                 if (r3.concentration) {
                     md += `払戻集中度: 最大1本が払戻の${r3.concentration.top1PayoutShare.toFixed(1)}% / 上位3本で${r3.concentration.top3PayoutShare.toFixed(1)}%。最大1本を除いた損益 ${Math.round(r3.concentration.pnlExcludingTop1).toLocaleString()}円（マイナスなら単発依存）
