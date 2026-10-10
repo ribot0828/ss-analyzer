@@ -54,9 +54,14 @@ document.addEventListener('DOMContentLoaded', () => {
     // simulateRace の skipTrio 判定と表示側の「（参照: xx%）」表示は必ずこの1箇所を見ること
     // （2026-08-02以前は表示側にSSSが漏れており、SSSだけ参照値が出ていなかった）
     const TRIO_SKIP_RECS = ['SSS', 'S', 'Low'];
+    // 三連複を執行しない軸クラス（2026-10-10 h22決着: B0+軸は executed 124R/63.2% → 133R/67.3% で2サイクル連続<80%）。
+    // 軸の繰り上げはしない（そのレースの三連複を丸ごとSKIP）。Place-Core・推奨度・単勝には一切影響させない。
+    // SKIP分は trifectaAxisPerformance[].axisRuleSkipped / axisRuleSkippedSinceChange で追跡し撤退判定(h25)に使う。
+    const TRIO_SKIP_AXIS_CLASSES = ['B0+'];
+    const TRIO_AXIS_SKIP_FROM = '2026-10-10';
 
     // ロジック仕様サマリー。エンジンのロジック変更時は本文と SPEC_UPDATED を必ずセットで更新すること
-    const SPEC_UPDATED = "2026-08-02";
+    const SPEC_UPDATED = "2026-10-10";
     const SPEC_BLOCK = `
 ---
 ### ◤ SS-Engine 現行仕様（前提）◢
@@ -76,7 +81,7 @@ document.addEventListener('DOMContentLoaded', () => {
 - 琥珀監査(Amber)通過条件: D1 → オッズ≧MAO ／ その他 → オッズ≧MAO×1.2
 - SS密度 = (EV≧1.300 かつ 評価∈{S,A,B,D} の頭数) ÷ max(12, 出走頭数)
 - 推奨度: 密度≧0.250 かつ S0/S1あり→SSS ／ 密度≧0.250 かつ 軸あり→SS ／ 密度≧0.150→S ／ それ未満→Low
-- 三連複（軸1頭ながし・上限3点）の執行判定: 推奨度SSのみ執行（SSS/S/LowはSKIP・refで追跡）。加えて軸不在、または 密度 <（重賞0.10 / 平場0.15）でもSKIP
+- 三連複（軸1頭ながし・上限3点）の執行判定: 推奨度SSのみ執行（SSS/S/LowはSKIP・refで追跡）。加えて軸不在、または 密度 <（重賞0.10 / 平場0.15）でもSKIP。さらに【軸がB0+のレースはSKIP】（2026-10-10 h22決着。軸の繰り上げなし＝そのレースの三連複を買わない。B0+はPlace-Coreに残るため推奨度・SS密度・単勝ステークは不変。撤退条件はh25）
 - 単勝ユニット配分: SSS/SS/S共通(A3=5,B2=2,A2=2,B1/D1/B3=1) ／ Low(すべて0)
 - 半減ルール: ダート1401m以上 または 重賞 は単勝ユニット max(1, floor(基本値/2))
 - R3小資金モード（現行運用）: 単勝優先順位1位の1点のみ購入。ステークは推奨度連動 SS=3U ／ SSS・S=1U ／ Low=0
@@ -102,7 +107,7 @@ document.addEventListener('DOMContentLoaded', () => {
 - liveOnlyView.smallBankSimulation.classBreakdown … ★R3で【実際に購入した1点目】のクラス別成績（betCount/hits/invest/payout/pnl/recoveryRate/maxDrawdownUnits）。R3のクラス別の話は必ずここを使う。classPerformance（全馬）と混同しない。配下の evDetails=クラス内EV帯別、gateSplit=馬番1〜12／13以上、hitOdds=的中馬のオッズ一覧。
 - liveOnlyView.smallBankSimulation.recBreakdown … R3購入分の推奨度別成績（ステーク連動の検証用）。
 - liveOnlyView.smallBankSimulation.concentration … R3の払戻集中度。pnlExcludingTop1/Top3 がマイナスなら単発高配当依存。回収率を根拠にする前に必ず確認する。
-- liveOnlyView.trifectaAxisPerformance … 三連複の軸クラス別成績。executed=SSのみ執行の実績、reference=全部買った場合。防御系クラスの取捨はここで判定する。
+- liveOnlyView.trifectaAxisPerformance … 三連複の軸クラス別成績。executed=現行ルール(SSのみ執行＋軸B0+はSKIP)の実績、reference=全部買った場合、axisRuleSkipped / axisRuleSkippedSinceChange=軸クラスSKIPだけで止めた分の仮想成績（全期間／2026-10-10以降）。maxPayout・pnlExcludingTop1=最大払戻1本と、それを除いた損益（マイナスなら単発依存）。axisCls="ALL"の行が三連複アーム全体。防御系クラスの取捨はここで判定する。★B0+の executed は2026-10-10以降の再計算では全期間0になる（ルールを過去にも適用して再シミュレーションするため）。B0+の実績を見るときは axisRuleSkipped を使うこと。
 - liveOnlyView.r3Variants … ★R3反実仮想シミュレーション（variants / evCutSweep）。提案する変更が既にここで計測されている場合は、その deltaPnl・deltaMaxDrawdownUnits を必ず引用すること。数値を自分で推測しない。
 - liveOnlyView.recommendationPerformance … 推奨度別。sampleRaces はレース数、winHitRate の分母は単勝を買ったレース数（別物なので混同しない）。三連複は現行SSのみ執行のため SSS/S/Low の trifecta* は常に0（trifectaSkipped=true）＝「買って外した」ではない。仮に買った場合の成績は refTrifectaRecoveryRate / refTrifectaHits / refTrifectaBetRaces を見る。
 - トップレベルの同名フィールド(summary / classPerformance / smallBankSimulation …)は全期間値。参考のみ。全期間値だけを根拠にした増額・緩和系の提案は禁止。
@@ -113,6 +118,7 @@ document.addEventListener('DOMContentLoaded', () => {
 - oddsDriftAnalysis / marginAnalysis / favoriteStructureAnalysis / equityCurveStats / surfaceDistanceAnalysis / runningStyleAnalysis / trackConditionAnalysis … 実行フラグ○のwin-Core馬のみ（フル配分で実際に買った馬）・全期間。
 - amberAudit.passed/failed … 監査通過/不通過別の全期間成績。
 - betTimingAnalysis … 実際の購入タイミング（発走何分前）。「締切直前に判定して取消す」系の提案は、このp10〜p90の中で実行可能かを必ず確認する。
+- runningStyleAnalysis … ★脚質(前/中/後)は【そのレース自体の通過順(最終コーナー位置)】から事後的に分類している。前で運べた馬が勝ちやすいのは結果の言い換えであり、購入時点では使えない（先読みリーク）。「前」の回収率の高さを根拠に脚質特徴量の導入を提案してはならない。導入を検討するなら、前走以前の通過順から事前推定した脚質で別途集計し、事前登録してから評価すること。
 
 【3】比較のルール
 - ROI(%)だけで優劣を決めない。必ず betCount / hitRate / invest / payout /【絶対損益 = payout − invest】を併記する。賭け金総額が減る変更は、ROI%が上がっても損益が減ることがある。
@@ -311,7 +317,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // 防御系クラスの軸適性を classPerformance の複勝率ではなく三連複の実績で判定するための枠。
             // 2026-09-16改訂: 当初の「Place-Coreから除外」は axis-noB0+ の実測で単勝側 -11,220円の巻き添えが出るため実施不能。
             //                  出口を「三連複の執行フィルターでの個別SKIP」に差し替えた（閾値 n≧60・回収<80%・2サイクル連続は据え置き）。
-            condition: '三連複の軸クラス別成績(liveOnlyView.trifectaAxisPerformance)で、executed n≧60・回収<80%が2サイクル連続したクラスは、まず【三連複の執行フィルターでの個別SKIP】を第一候補として審議する。Place-Core そのものからの除外は、r3Variants の axis-no* が示す単勝側の損失（2026-09-16時点: axis-noB0+ で deltaPnl -11,220円・推奨度SS→S降格によるステーク半減が原因）を上回る三連複側の改善を示せる場合に限る。判定時は三連複アーム全体の executed 合計損益も必ず併記すること（2026-09-16時点 +370円・回収100.9%＝アーム全体はほぼ収支均衡のため、最大バケットを切ると残りが単発依存になる点に注意）。B0+: 2026-09-16サイクルで executed 124R/回収63.2%＝該当1回目、2回目待ち。B0 は 11R と少なすぎて判定不能',
+            condition: '三連複の軸クラス別成績(liveOnlyView.trifectaAxisPerformance)で、executed n≧60・回収<80%が2サイクル連続したクラスは、まず【三連複の執行フィルターでの個別SKIP】を第一候補として審議する。Place-Core そのものからの除外は、r3Variants の axis-no* が示す単勝側の損失（2026-09-16時点: axis-noB0+ で deltaPnl -11,220円・推奨度SS→S降格によるステーク半減が原因）を上回る三連複側の改善を示せる場合に限る。判定時は三連複アーム全体の executed 合計損益も必ず併記すること（2026-09-16時点 +370円・回収100.9%＝アーム全体はほぼ収支均衡のため、最大バケットを切ると残りが単発依存になる点に注意）。B0+: 2026-09-16サイクルで executed 124R/回収63.2%＝該当1回目 → 2026-10-04データ(2026-10-10査定)で 133R/的中12/投資27,500円/払戻18,510円/損益-8,990円/回収67.3%＝2回目到達 → 【2026-10-10 B0+軸の三連複SKIPを実施】（TRIO_SKIP_AXIS_CLASSES・撤退条件はh25）。当時のアーム全体 executed 227R/+450円/100.9%、B0+除外後 94R/+9,440円/146.7%（A0 71R/7的中/+7,810円・B0 14R/2的中/+3,330円・A1 9R/0的中/-1,700円）。★今後の判定方式改訂（2026-10-10）: 2サイクル目は累計値だけでなく【前サイクルからの増分ベット】も併記し、増分 n≧20 で増分回収も<100%であることを要件に加える（B0+の2回目は124R→133Rで新規わずか9Rで、累計の93%が1回目と重複していたため）。A1 は 9R、B0 は 14R で判定不能',
             compute: null // 手動判定（liveOnlyView.trifectaAxisPerformance を参照。rows単位では算出できない）
         },
         {
@@ -333,6 +339,13 @@ document.addEventListener('DOMContentLoaded', () => {
             // ※スコア配点(S=100等)の変更はEV式本体の改修＝H2領域。h19のr²≧0.30が2サイクル連続するまで提案不可。
             condition: 'S1(評価S × EV0.700〜0.999)の単勝: 登録日以降live n≧60 かつ ①単勝回収≧110% ②最大1本を除いた回収≧100% ③rankCalibration.S.ratio≧1.30 の維持、の3条件すべてを満たしたときのみ「S1をWin-Core(単勝候補)へ追加(優先順位はA3の上・ステーク1U)」を審議する。審議時は、S1がPlace-Core(軸)でもあるため同一馬が軸かつ単勝1点目になる重複と、単勝優先順位の繰り上がりへの波及を必ず述べること。S0(EV<0.700)は live 92.0%(n=46)／全期間86.7%(n=113)で対象外、S2は live n=3 で判定不能。2026-09-16時点(累計live・実行○): n=19/9的中/回収157.4%(最大1本除129.5%)、全期間 n=50/18的中/120.6%(除109.4%)。n<60での前倒し実施は不可',
             compute: rows => hypoStat(rows.filter(r => isExecutedBet(r) && ratingOf(r) === 'S' && evOf(r) >= 0.700 && evOf(r) < 1.000))
+        },
+        {
+            id: 'h25', name: 'B0+軸 三連複SKIPの撤退監視', registeredOn: '2026-10-10', dataFrom: '2026-10-10', direction: '観察',
+            // h22の出口として2026-10-10にB0+軸の三連複をSKIP。止めた分は trifectaAxisPerformance[B0+].axisRuleSkippedSinceChange で仮想追跡する。
+            // ※ executed は過去分もルール適用で再計算されB0+は0になるため、変更前の実績は axisRuleSkipped(全期間) を見ること。
+            condition: 'SKIP後のB0+軸(SS推奨・密度条件を満たし軸クラスSKIPだけで止めたレース)の仮想成績 liveOnlyView.trifectaAxisPerformance[B0+].axisRuleSkippedSinceChange: n≧60 で回収≧100% かつ 最大1本除いた損益(pnlExcludingTop1)≧0 なら執行を再開する。あわせて三連複アーム全体(axisCls=ALL の executed)を変更後サンプルで監視し、n≧60 で回収<80% ならアーム全体の存続(三連複の全停止)を審議する。変更前サンプルを含む集計で再開・停止を判断してはならない（2026-10-10時点の変更前実績: 133R/67.3%/-8,990円）。現ペース約+5R/週・到達目安2026-12下旬',
+            compute: null // 手動判定（trifectaAxisPerformance を参照。rows単位では算出できない）
         }
     ];
 
@@ -992,7 +1005,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const minDensity = isGraded ? 0.100 : 0.150;
         const rec = determineRecommendation(raceHorses);
         const baseSkipTrio = !hasAxis || density < minDensity;
-        const skipTrio = baseSkipTrio || TRIO_SKIP_RECS.includes(rec);
+        let skipTrio = baseSkipTrio || TRIO_SKIP_RECS.includes(rec);
 
         const attackSort = ATTACK_SORT; // 三連複2列目攻撃の選定で使用
         const pureEvSort = PURE_EV_SORT; // 軸・2列目防御の選定で使用
@@ -1075,6 +1088,10 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
+        // 軸クラスによる個別SKIP（推奨度SKIPされていないレースだけを数える＝ルール単独の効果を分離するため）
+        const trioSkippedByAxis = !skipTrio && !!axisHorse && TRIO_SKIP_AXIS_CLASSES.includes(clsOf(axisHorse));
+        if (trioSkippedByAxis) skipTrio = true;
+
         const { winPayoutMap: actualWinPayoutMap, trioPayout: actualTrioPayout } = buildRacePayouts(raceHorses);
 
         let winInvest = 0;
@@ -1140,6 +1157,7 @@ document.addEventListener('DOMContentLoaded', () => {
             rec: rec,
             ssDensity: density,
             skipTrio: skipTrio,
+            trioSkippedByAxis: trioSkippedByAxis,
             axisHorse: axisHorse,
             row2: row2,
             row3: row3Array,
@@ -1583,28 +1601,53 @@ document.addEventListener('DOMContentLoaded', () => {
         simulatedRaces.forEach(r => {
             if (!r.axisHorse) return;
             const cls = clsOf(r.axisHorse) || '不明';
-            if (!groups[cls]) groups[cls] = { executed: [], reference: [] };
+            if (!groups[cls]) groups[cls] = { executed: [], reference: [], axisRuleSkipped: [], axisRuleSkippedSinceChange: [] };
             // 参照: 推奨度SKIPを無視して全て買った場合（refTrio*）
             if (r.refTrioInvest > 0) groups[cls].reference.push({ invest: r.refTrioInvest, payout: r.refTrioReturn });
-            // 執行: 現行ルール(SSのみ執行)で実際に買った分
+            // 執行: 現行ルール(SSのみ執行＋軸クラスSKIP)で実際に買った分
             if (r.trioInvest > 0) groups[cls].executed.push({ invest: r.trioInvest, payout: r.trioReturn });
+            // 軸クラスSKIPだけで止めた分（買っていたらどうだったか）。撤退判定(h25)は SinceChange のみを使う
+            if (r.trioSkippedByAxis && r.refTrioInvest > 0) {
+                const bet = { invest: r.refTrioInvest, payout: r.refTrioReturn };
+                groups[cls].axisRuleSkipped.push(bet);
+                const date = r.horses[0] ? (r.horses[0]["日付"] || "") : "";
+                if (date >= TRIO_AXIS_SKIP_FROM) groups[cls].axisRuleSkippedSinceChange.push(bet);
+            }
         });
+        // pnlExcludingTop1: 最大払戻1本を除いた損益。マイナスなら単発依存（h22の注意書き「残りが単発依存になる」の確認用）
         const summarize = (list) => {
             const invest = list.reduce((a, b) => a + b.invest, 0);
             const payout = list.reduce((a, b) => a + b.payout, 0);
             const hits = list.filter(b => b.payout > 0).length;
+            const maxPayout = list.reduce((m, b) => Math.max(m, b.payout), 0);
             return {
                 betRaces: list.length, hits,
                 hitRate: list.length > 0 ? (hits / list.length) * 100 : 0,
                 invest, payout, pnl: payout - invest,
-                recoveryRate: invest > 0 ? (payout / invest) * 100 : 0
+                recoveryRate: invest > 0 ? (payout / invest) * 100 : 0,
+                maxPayout,
+                pnlExcludingTop1: payout - maxPayout - invest
             };
         };
-        return AXIS_CLASSES.filter(c => groups[c]).map(cls => ({
+        const rows = AXIS_CLASSES.filter(c => groups[c]).map(cls => ({
             axisCls: cls,
             executed: summarize(groups[cls].executed),
-            reference: summarize(groups[cls].reference)
+            reference: summarize(groups[cls].reference),
+            axisRuleSkipped: summarize(groups[cls].axisRuleSkipped),
+            axisRuleSkippedSinceChange: summarize(groups[cls].axisRuleSkippedSinceChange)
         }));
+        // 三連複アーム全体（executed合計）。h22「判定時はアーム全体の executed 合計損益も必ず併記」に対応
+        if (rows.length > 0) {
+            const pool = key => AXIS_CLASSES.filter(c => groups[c]).flatMap(c => groups[c][key]);
+            rows.push({
+                axisCls: 'ALL',
+                executed: summarize(pool('executed')),
+                reference: summarize(pool('reference')),
+                axisRuleSkipped: summarize(pool('axisRuleSkipped')),
+                axisRuleSkippedSinceChange: summarize(pool('axisRuleSkippedSinceChange'))
+            });
+        }
+        return rows;
     }
 
     function wilsonCI(k, n) {
@@ -3371,13 +3414,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     "smallBankSimulation.concentration": "R3の払戻集中度。pnlExcludingTop1/Top3 がマイナスなら単発高配当依存と判断する",
                     "smallBankSimulation.hitOddsDistribution / topPayouts": "R3的中馬のオッズ帯分布と払戻上位5本。回収率が単発依存かの確認に使う",
                     "smallBankSimulation.fullAllocation.classBreakdown": "フル配分で実際に購入した馬のクラス別成績（1点目に限らない）。R3の話には混ぜないこと",
-                    "trifectaAxisPerformance": "三連複の【軸馬クラス別】成績。executed=現行ルール(SSのみ執行)で実際に買った分、reference=SKIPを無視して全部買った場合。防御系クラスの取捨（例: B0を軸から外すか）はclassPerformanceの複勝率ではなくこの表で判定する",
+                    "trifectaAxisPerformance": "三連複の【軸馬クラス別】成績。executed=現行ルール(SSのみ執行＋軸B0+はSKIP)で実際に買った分、reference=SKIPを無視して全部買った場合、axisRuleSkipped/axisRuleSkippedSinceChange=軸クラスSKIPだけで止めた分の仮想成績(全期間/2026-10-10以降。h25の撤退判定はSinceChangeのみ)、pnlExcludingTop1=最大払戻1本を除いた損益、axisCls=ALLはアーム全体。防御系クラスの取捨（例: B0を軸から外すか）はclassPerformanceの複勝率ではなくこの表で判定する",
                     "r3Variants": "★R3反実仮想シミュレーション。同一レース群で設定だけ差し替えた結果。variants=順位入替/クラスN降格/軸構成変更/ステーク配分/壁フィルター拡張、evCutSweep=クラス別EV境界の総当たり。baselineとの差分は deltaPnl / deltaMaxDrawdownUnits。classMix は変更後に何のクラスが繰り上がったかを示す。※スイープは多重比較なので、良く見えた1点を根拠に採用しないこと",
                     "liveOnlyView.summary.overallWinRecoveryRate": "★フル配分ベースの単勝回収率。現行運用(R3)の回収率ではないので『現行の回収率』として引用しないこと",
                     "classPerformance / liveOnlyView.classPerformance": "購入時クラスに分類された【全馬】。壁フィルタ・単勝優先順位・R3の1点縛りは未反映。D1/XのAmber不通過は 'D1(NG)' 等に分離",
                     "evaluationPerformance": "【評価ランク(S〜F)×EV帯】の全馬集計。クラス(A2/B2…)別ではない。クラス境界の検討には classPerformance[].evDetails を使うこと",
                     "recommendationPerformance": "推奨度別。sampleRaces=レース数、winHitRate の分母は単勝を買ったレース数（別物）。三連複は現行SSのみ執行のため、SSS/S/Low の trifecta* は常に0で『買って外した』ではない。仮に買っていた場合の成績は refTrifecta*（SSS/S/Lowすべてで算出）を見ること",
                     "oddsDriftAnalysis / marginAnalysis / favoriteStructureAnalysis / equityCurveStats / surfaceDistanceAnalysis / runningStyleAnalysis / trackConditionAnalysis": "実行フラグ○のwin-Core馬のみ（フル配分で実際に買った馬）・全期間",
+                    "runningStyleAnalysis(注意)": "★脚質はそのレース自体の通過順(最終コーナー位置)からの事後分類。購入時点では使えない先読みリークなので、『前』の回収率を根拠に脚質特徴量の導入を提案しないこと",
                     "timeSplitStability": "★日付順に並べた対象レースを半分に割った【期間】の前半/後半。1日の後半レース・発走時刻・レース番号とは無関係",
                     "evCalibrationShadow": "【2026-08-02に廃止・出力なし】市場ブレンド較正はev_cal=0.5*EV+0.4のアフィン(単調)変換でレース内の序列が変わらず、実体はクラス境界の一括付け替えにすぎなかった。実測でも2サイクル連続で現行R3の絶対損益を下回ったため破棄。同種の『EV較正で序列/slopeが改善する』という提案は再提示しないこと",
                     "hypothesisRegistry": "事前登録済みの検証中仮説。current は registeredOn 以降の累積。条件未達の仮説を前倒しで実施提案しないこと",
@@ -4557,12 +4601,13 @@ R3全体: ${r3.betCount}点 / 的中${r3.hits ?? '-'}件 (${r3.hitRate.toFixed(2
                 const trioAxis = computeTrifectaAxisPerformance(liveSimRaces);
                 if (trioAxis.length > 0) {
                     md += `## 6. 三連複 軸クラス別成績（実運用レースのみ）
-※防御系クラスの取捨は表2の複勝率ではなくこの表で判定する。executed=現行ルール(SSのみ執行)、参照=SKIPを無視して全部買った場合。
-| 軸クラス | 執行レース | 執行的中 | 執行回収率 | 執行損益 | 参照レース | 参照的中 | 参照回収率 |
-|---|---|---|---|---|---|---|---|
+※防御系クラスの取捨は表2の複勝率ではなくこの表で判定する。executed=現行ルール(SSのみ執行＋軸${TRIO_SKIP_AXIS_CLASSES.join('/')}はSKIP)、参照=SKIPを無視して全部買った場合。軸SKIP=軸クラスSKIPだけで止めた分の仮想成績（全期間／${TRIO_AXIS_SKIP_FROM}以降）。ALL=三連複アーム全体。
+| 軸クラス | 執行レース | 執行的中 | 執行回収率 | 執行損益 | 執行 最大1本除く損益 | 参照レース | 参照的中 | 参照回収率 | 軸SKIP(全期間) | 軸SKIP(変更後) |
+|---|---|---|---|---|---|---|---|---|---|---|
 `;
+                    const fmtSkip = s => s.betRaces > 0 ? `${s.betRaces}R/的中${s.hits}/${s.recoveryRate.toFixed(1)}%/${Math.round(s.pnl).toLocaleString()}円` : '-';
                     trioAxis.forEach(a => {
-                        md += `| ${a.axisCls} | ${a.executed.betRaces} | ${a.executed.hits} | ${a.executed.recoveryRate.toFixed(1)}% | ${Math.round(a.executed.pnl).toLocaleString()}円 | ${a.reference.betRaces} | ${a.reference.hits} | ${a.reference.recoveryRate.toFixed(1)}% |
+                        md += `| ${a.axisCls} | ${a.executed.betRaces} | ${a.executed.hits} | ${a.executed.recoveryRate.toFixed(1)}% | ${Math.round(a.executed.pnl).toLocaleString()}円 | ${Math.round(a.executed.pnlExcludingTop1).toLocaleString()}円 | ${a.reference.betRaces} | ${a.reference.hits} | ${a.reference.recoveryRate.toFixed(1)}% | ${fmtSkip(a.axisRuleSkipped)} | ${fmtSkip(a.axisRuleSkippedSinceChange)} |
 `;
                     });
                     md += `
