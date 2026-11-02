@@ -59,9 +59,14 @@ document.addEventListener('DOMContentLoaded', () => {
     // SKIP分は trifectaAxisPerformance[].axisRuleSkipped / axisRuleSkippedSinceChange で追跡し撤退判定(h25)に使う。
     const TRIO_SKIP_AXIS_CLASSES = ['B0+'];
     const TRIO_AXIS_SKIP_FROM = '2026-10-10';
+    // ワイドは執行しない（v5.29で無効化）。2案だけ参照値として紙上追跡する（h27・2026-10-24登録）。
+    // 探索に使ったデータが2026-10-18までなので、h27の判定は WIDE_REF_FROM 以降のレースだけで行う（後知恵防止）。
+    const WIDE_REF_FROM = '2026-10-19';
+    // h26採用日: R3のダ1401m+半減の開始日（h28の撤退判定はこの日以降のサンプルだけで行う）
+    const R3_DIRTLONG_HALF_FROM = '2026-11-02';
 
     // ロジック仕様サマリー。エンジンのロジック変更時は本文と SPEC_UPDATED を必ずセットで更新すること
-    const SPEC_UPDATED = "2026-10-18";
+    const SPEC_UPDATED = "2026-11-02";
     const SPEC_BLOCK = `
 ---
 ### ◤ SS-Engine 現行仕様（前提）◢
@@ -82,9 +87,10 @@ document.addEventListener('DOMContentLoaded', () => {
 - SS密度 = (EV≧1.300 かつ 評価∈{S,A,B,D} の頭数) ÷ max(12, 出走頭数)
 - 推奨度: 密度≧0.250 かつ S0/S1あり→SSS ／ 密度≧0.250 かつ 軸あり→SS ／ 密度≧0.150→S ／ それ未満→Low
 - 三連複（軸1頭ながし・上限3点）の執行判定: 推奨度SSのみ執行（SSS/S/LowはSKIP・refで追跡）。加えて軸不在、または 密度 <（重賞0.10 / 平場0.15）でもSKIP。さらに【軸がB0+のレースはSKIP】（2026-10-10 h22決着。軸の繰り上げなし＝そのレースの三連複を買わない。B0+はPlace-Coreに残るため推奨度・SS密度・単勝ステークは不変。撤退条件はh25）
+- ワイド: 執行しない（v5.29で無効化）。2案（単勝1点目×軸／軸→相手最大3点）だけ参照値 wideReference で紙上追跡中（h27・判定は2026-10-19以降のみ）。2026-10-24の探索では12案すべてが回収100%未満で、R3単勝に足すと損益が減った
 - 単勝ユニット配分: SSS/SS/S共通(A3=5,B2=2,A2=2,B1/D1/B3=1) ／ Low(すべて0)
-- 半減ルール: ダート1401m以上 または 重賞 は単勝ユニット max(1, floor(基本値/2))（★フル配分のユニットにのみ適用。R3ステークには未適用）
-- R3小資金モード（現行運用）: 単勝優先順位1位の1点のみ購入。ステークは推奨度連動 SS=3U ／ SSS・S=1U ／ Low=0（ダ1401m+・重賞でも半減しない。R3への半減適用は h26 で計測中＝r3Variants の cond-*。採否基準は事前登録済みで前倒し不可）
+- 半減ルール: ダート1401m以上 または 重賞 は単勝ユニット max(1, floor(基本値/2))（フル配分のユニットに適用。R3ステークへはダ1401m+側だけを2026-11-02に適用＝下記）
+- R3小資金モード（現行運用）: 単勝優先順位1位の1点のみ購入。ステークは推奨度連動 SS=3U ／ SSS・S=1U ／ Low=0。【ダ1401m+は半減＝SS 3U→1U（SSS/Sは1Uのまま）】（2026-11-02 h26採用。cond-dirtlong-half が3サイクル連続で deltaDirect>0: +1,140→+1,540→+2,140円・affectedBets 69・最大DD −5.6U）。重賞は3Uのまま（cond-grade-half は affectedBets<60 で計測継続中）。撤退条件は h28（r3Variants の cond-dirtlong-restore-since）
 - EV較正の合否判定(H2): slope は r²≧0.30 のときだけ有効。r²<0.30 なら回帰に説明力が無いため【判定不能】とし、slopeの値に関わらずEV式本体の補正を最優先扱いにしない（実績: slope は 0.2843→0.2288→-0.0326→-0.0051→-0.0198→0.1235→0.1255 と7サイクル符号反転、r²は0.0001〜0.1181。h19参照）
 - evCalibrationShadow: 【2026-08-02に廃止。JSONに出力されない】市場ブレンド較正(α=0.5)は p_cal=0.5*p+0.5*(0.8/odds) ⇔ ev_cal = 0.5*EV + 0.4 の【アフィン(単調)変換】であり、レース内の馬の序列は変わらない＝実体は全クラス境界の一括付け替え。「較正でslopeが直る／序列が改善する」という主張は原理的に成立しない（slopeは1/0.5倍になるだけ）。実測でも2サイクル連続で現行R3の絶対損益に劣後したため破棄済み（h17）。同種の提案を再提示しないこと
 - 較正切替を提案してよい条件（全て必須）: ①liveOnly n≧300 ②【絶対損益(payout−invest)】が現行R3運用(liveOnlyView.smallBankSimulation)を上回る ③的中率の低下が現行比 −3pt以内 ④防御系(B0+/S0等)・SS密度・推奨度・三連複への影響を含めた全系統の再シミュレーションでR3のmaxDDが悪化しない
@@ -109,7 +115,8 @@ document.addEventListener('DOMContentLoaded', () => {
 - liveOnlyView.smallBankSimulation.currentDrawdownUnits / currentLosingStreak … R3の現在地（直近の最高値からの下落幅U・直近の連敗数）。maxDrawdownUnits は過去最大で、今DD中かどうかはこちらで見る。
 - liveOnlyView.smallBankSimulation.concentration … R3の払戻集中度。pnlExcludingTop1/Top3 がマイナスなら単発高配当依存。回収率を根拠にする前に必ず確認する。
 - liveOnlyView.trifectaAxisPerformance … 三連複の軸クラス別成績。executed=現行ルール(SSのみ執行＋軸B0+はSKIP)の実績、reference=全部買った場合、axisRuleSkipped / axisRuleSkippedSinceChange=軸クラスSKIPだけで止めた分の仮想成績（全期間／2026-10-10以降）。maxPayout・pnlExcludingTop1=最大払戻1本と、それを除いた損益（マイナスなら単発依存）。axisCls="ALL"の行が三連複アーム全体。防御系クラスの取捨はここで判定する。★B0+の executed は2026-10-10以降の再計算では全期間0になる（ルールを過去にも適用して再シミュレーションするため）。B0+の実績を見るときは axisRuleSkipped を使うこと。
-- liveOnlyView.r3Variants … ★R3反実仮想シミュレーション（variants / evCutSweep）。提案する変更が既にここで計測されている場合は、その deltaPnl・deltaMaxDrawdownUnits を必ず引用すること。数値を自分で推測しない。affectedBets=基準から変化したベット数（馬の入替・消滅・ステーク増減）で、差分の母数として併記する。cond-*（ダ1401m+・重賞のステーク半減/SKIP）は h26 の判定専用で、選定を変えないため deltaSubstitution は常に0。
+- liveOnlyView.wideReference … ワイドの紙上成績（★ワイドは執行していない。h27）。plans=2案（pickAxis=単勝1点目×三連複の軸の1点／axisMates=軸→三連複の相手へ最大3点＝v5.29で止めた旧ワイド型）。各案に all（馬番付き払戻がある2026-06-06以降の全部＝探索期間を含む参考値）と sinceRegistration（2026-10-19以降＝h27の判定用）。wide=ワイド単体（betRaces/points/hits/invest/payout/pnl/recoveryRate/pnlExcludingTop1/maxDrawdownUnits）、withR3=同じレース群でR3単勝だけの場合との差（deltaPnl・deltaMaxDrawdownUnits）。対象は軸がいるレース（三連複の密度条件を満たす）かつ推奨度Low以外。★all の値を根拠にワイド採用を提案してはならない。購入時のワイドオッズは記録していないので、ワイドのEVは計算できない。
+- liveOnlyView.r3Variants … ★R3反実仮想シミュレーション（variants / evCutSweep）。提案する変更が既にここで計測されている場合は、その deltaPnl・deltaMaxDrawdownUnits を必ず引用すること。数値を自分で推測しない。affectedBets=基準から変化したベット数（馬の入替・消滅・ステーク増減）で、差分の母数として併記する。cond-*（ダ1401m+・重賞のステーク条件）は h26/h28 の判定専用で、選定を変えないため deltaSubstitution は常に0。基準はすでに「ダ1401m+=半減」なので、cond-dirtlong-restore-since（採用日2026-11-02以降のダ1401m+を3Uへ戻した場合＝h28の撤退判定用）／cond-dirtlong-restore（全期間で戻した参考値）は逆向きの差分。cond-grade-half/skip は重賞側（h26継続）。
 - 決着済みでクローズした仮説（h7ドリフトガード／h10 S三連複再開／h18 B1降格）は、hypothesisRegistry に数値が出力され続けても、同じ数値を根拠に同じ変更を再提案しないこと。
 - liveOnlyView.recommendationPerformance … 推奨度別。sampleRaces はレース数、winHitRate の分母は単勝を買ったレース数（別物なので混同しない）。三連複は現行SSのみ執行のため SSS/S/Low の trifecta* は常に0（trifectaSkipped=true）＝「買って外した」ではない。仮に買った場合の成績は refTrifectaRecoveryRate / refTrifectaHits / refTrifectaBetRaces を見る。
 - トップレベルの同名フィールド(summary / classPerformance / smallBankSimulation …)は全期間値。参考のみ。全期間値だけを根拠にした増額・緩和系の提案は禁止。
@@ -356,8 +363,21 @@ document.addEventListener('DOMContentLoaded', () => {
             id: 'h26', name: 'R3へのダ1401m+/重賞半減ルール適用', registeredOn: '2026-10-18', dataFrom: '2026-10-18', direction: '削る',
             // 2026-10-18査定: エンジンの半減ルール(h5/h6, 2026-07-12〜)はフル配分ユニットにのみ効き、R3の推奨度連動ステーク(SS=3U)には未適用。
             // h5のフル配分ダ1401m+は n=119/的中5/54.5% だが、R3購入分での効果は未計測だったため r3Variants の cond-* として計測を追加し、採否基準を事前登録する。
-            condition: 'r3Variants の cond-dirtlong-half / cond-dirtlong-skip / cond-grade-half / cond-grade-skip / cond-half-rule（選定は変えずステークだけ動かすので deltaSubstitution=0）で判定する。採用候補は【half系のみ】（skip系は比較用。skipの方が良く見えても、まずhalfで2サイクル確認してから別途審議）。採用条件（全て必須）: ①affectedBets≧60 ②deltaDirect>0 が【2サイクル連続】かつ2サイクル目は前サイクルからの増分でも deltaDirect>0 ③deltaMaxDrawdownUnits≦0 ④dirtlong と grade を別々に見て、効いている側だけを採用する（cond-half-rule は両方採用する場合の確認用）。採用時はR3ステークを「SS=3U、ただしダ1401m+(または重賞)は1U」に変更し、SPEC_BLOCK・エンジン運用メモを同時更新する。撤退条件: 採用後は逆向きのvariant（該当条件を3Uに戻した場合）を追加し、変更後サンプルで affectedBets≧60 かつ deltaDirect>0 なら3Uへ戻す。判定に使う r3Variants は累計liveの反実仮想（採否基準は計測前の2026-10-18に固定）。2026-10-18時点は計測開始のみ（前倒し実施不可）',
+            condition: '【2026-11-02 ダ1401m+側を採用・重賞側は計測継続】cond-dirtlong-half が (56)+1,140円/aff64 → (57)+1,540円/aff66（増分+400円/2ベット）→ (58)+2,140円/aff69（増分+600円/3ベット）で3サイクル連続 deltaDirect>0・deltaMaxDrawdownUnits −5.6U・deltaSubstitution 0 → R3のダ1401m+を半減（SS 3U→1U）。逆算した対象69点の成績は投資20,700円/払戻17,490円/84.5%で、10倍の的中1本で符号が反転する幅＝利益改善ではなくリスク削減として採用。撤退条件は h28。重賞側（cond-grade-half）は 2026-11-02時点で affectedBets 32/60 のため以下の条件で判定を続ける。cond-half-rule は基準がダ側を含むようになり cond-grade-half と同一になったので廃止。（旧条件）r3Variants の cond-dirtlong-half / cond-dirtlong-skip / cond-grade-half / cond-grade-skip / cond-half-rule（選定は変えずステークだけ動かすので deltaSubstitution=0）で判定する。採用候補は【half系のみ】（skip系は比較用。skipの方が良く見えても、まずhalfで2サイクル確認してから別途審議）。採用条件（全て必須）: ①affectedBets≧60 ②deltaDirect>0 が【2サイクル連続】かつ2サイクル目は前サイクルからの増分でも deltaDirect>0 ③deltaMaxDrawdownUnits≦0 ④dirtlong と grade を別々に見て、効いている側だけを採用する（cond-half-rule は両方採用する場合の確認用）。採用時はR3ステークを「SS=3U、ただしダ1401m+(または重賞)は1U」に変更し、SPEC_BLOCK・エンジン運用メモを同時更新する。撤退条件: 採用後は逆向きのvariant（該当条件を3Uに戻した場合）を追加し、変更後サンプルで affectedBets≧60 かつ deltaDirect>0 なら3Uへ戻す。判定に使う r3Variants は累計liveの反実仮想（採否基準は計測前の2026-10-18に固定）。2026-10-18時点は計測開始のみ（前倒し実施不可）',
             compute: null // 手動判定（liveOnlyView.r3Variants.variants の cond-* を参照）
+        },
+        {
+            id: 'h27', name: 'ワイド2案の紙上追跡', registeredOn: '2026-10-24', dataFrom: WIDE_REF_FROM, direction: '攻める',
+            // 2026-10-24探索: live 2026-06-06〜10-18（馬番付きワイド払戻のある期間）で12案を集計し、全案が回収100%未満。
+            // 構造的に意味があり成績も上位だった2案だけを残して紙上追跡する（12案中の上位2案＝選択バイアスがあるので採用の基準は高めに置く）。
+            condition: 'liveOnlyView.wideReference.plans[].sinceRegistration（2026-10-19以降・執行していない紙上成績）だけで判定する。対象は pickAxis（単勝1点目×軸の1点）と axisMates（軸→三連複の相手へ最大3点＝旧ワイド型）。【採用審議の条件（案ごと・すべて必須）】①wide.betRaces≧150 ②wide.recoveryRate≧110% ③wide.pnlExcludingTop1≧0 ④withR3.deltaMaxDrawdownUnits≦0（R3単勝に足して最大DDが悪化しない）。満たしても自動では採用せず、購入時のワイドオッズを記録できるようにしてから審議する（現状はワイドのEVを計算できない）。【追跡終了】betRaces≧150 で recoveryRate<90% ならその案はクローズ。【禁止】all（探索期間を含む）の値・クラス別などの切り分けを根拠に前倒しで採用しない。探索時の記録（2026-06-06〜10-18・live）: pickAxis 385R/的中55(14.3%)/投資38,500円/払戻36,080円/-2,420円/93.7%・最大1本除き-5,370円・R3併用でDD+28.0U ／ axisMates 403R/919点/的中162(40.2%)/投資91,900円/払戻87,850円/-4,050円/95.6%・最大1本除き-8,240円・R3併用でDD+44.7U。他の10案（単勝1点目×1番人気85.3%・単勝1点目→軸＋相手74.7%・軸→攻撃1・2点目92.6%・攻撃1×2 64.9%・Harville法のEV上位37〜94%）は不採用で、再提案しないこと。現ペース約+20R/週・到達目安2026-12中旬',
+            compute: null // 手動判定（liveOnlyView.wideReference を参照。rows単位では算出できない）
+        },
+        {
+            id: 'h28', name: 'R3ダ1401m+半減の撤退監視', registeredOn: '2026-11-02', dataFrom: R3_DIRTLONG_HALF_FROM, direction: '観察',
+            // h26の出口として2026-11-02にR3のダ1401m+を半減。採用前のサンプル（半減が有利に出た期間）を含む累計では戻す判断をしない。
+            condition: 'liveOnlyView.r3Variants の cond-dirtlong-restore-since（2026-11-02以降のダ1401m+だけ3Uへ戻した場合）で判定する。affectedBets≧60 かつ deltaDirect>0（＝採用後のダ1401m+のSSで、3Uのほうが損益が良かった）なら3Uへ戻す。cond-dirtlong-restore（採用前を含む全期間）は参考値で、判定には使わない。採用前の実績: 対象69点/投資20,700円/払戻17,490円/84.5%。現ペース約3ベット/週・到達目安2027-03以降。前倒しでの撤退・skipへの深掘りは不可（skip化はh28が決着してから別途審議）',
+            compute: null // 手動判定（liveOnlyView.r3Variants.variants の cond-dirtlong-restore-since を参照）
         }
     ];
 
@@ -542,6 +562,23 @@ document.addEventListener('DOMContentLoaded', () => {
         const p = parseInt(s.replace(/[^0-9]/g, ''), 10) || 0;
         return { pay: p, key: null };
     }
+
+    // ワイド払戻: '1-3: 1180円 / 1-5: 610円 / 3-5: 840円' → { '1-3': 1180, '1-5': 610, '3-5': 840 }（キーは馬番昇順）
+    // 馬番付きになったのは2026-06-06以降。それ以前の '800円  2230円  1350円' 形式は組が特定できないので null を返す
+    function parseWideMap(raceHorses) {
+        const raw = raceHorses.map(h => h["ワイド払戻"]).find(v => v && (v.includes(':') || v.includes('：')));
+        if (!raw) return null;
+        const map = {};
+        raw.split('/').forEach(seg => {
+            const parts = seg.split(/[:：]/);
+            if (parts.length < 2) return;
+            const key = parts[0].replace(/[^0-9-]/g, '').split('-').filter(Boolean).map(Number).sort((a, b) => a - b).join('-');
+            const pay = parseInt(parts.slice(1).join('').replace(/[^0-9]/g, ''), 10) || 0;
+            if (key && pay > 0) map[key] = pay;
+        });
+        return Object.keys(map).length >= 2 ? map : null;
+    }
+    const widePairKey = (a, b) => [parseInt(a["馬番"]), parseInt(b["馬番"])].sort((x, y) => x - y).join('-');
 
     function addFileBadge(name, count) {
         const badge = document.createElement('div');
@@ -1163,6 +1200,26 @@ document.addEventListener('DOMContentLoaded', () => {
         const refTrioInvest = finalTrioCombos.size * 100;
         const refTrioReturn = trioReturn;
 
+        // ワイド参照値（h27・執行しない）。1点100円。Low推奨度は単勝・三連複と同じく対象外
+        //  pickAxis  = 単勝1点目（R3で買う馬）× 三連複の軸 の1点
+        //  axisMates = 三連複の軸 → 三連複の相手(row2)へ最大3点（v5.29で止めた旧ワイド型）
+        const wideMap = parseWideMap(raceHorses);
+        const refWide = { keyed: !!wideMap, pickAxis: null, axisMates: null };
+        if (wideMap && rec !== 'Low' && axisHorse) {
+            const pick = finalWinBets[0];
+            if (pick && pick !== axisHorse) {
+                refWide.pickAxis = { invest: 100, payout: wideMap[widePairKey(pick, axisHorse)] || 0, points: 1 };
+            }
+            const mates = row2.filter(h => h !== axisHorse).slice(0, 3);
+            if (mates.length > 0) {
+                refWide.axisMates = {
+                    invest: mates.length * 100,
+                    payout: mates.reduce((s, m) => s + (wideMap[widePairKey(axisHorse, m)] || 0), 0),
+                    points: mates.length
+                };
+            }
+        }
+
         return {
             id: raceId,
             horses: raceHorses,
@@ -1182,7 +1239,8 @@ document.addEventListener('DOMContentLoaded', () => {
             trioInvest: skipTrio ? 0 : refTrioInvest,
             trioReturn: skipTrio ? 0 : refTrioReturn,
             refTrioInvest: refTrioInvest,
-            refTrioReturn: refTrioReturn
+            refTrioReturn: refTrioReturn,
+            refWide: refWide
         };
     }
 
@@ -1276,6 +1334,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // --- R3: 単勝優先順位・先頭1点のみ／推奨度連動ステーク（V5' 2026-07-19〜） ---
         // Low推奨度はエンジン(winTargets空)・バックテストR3とも全スキップのため、ここでも購入しない
         // SS=3U(300円)・SSS/S=1U(100円)。根拠: backtest_r3_stake_variants.py V5'（liveOnly回収227.1%）
+        // 2026-11-02〜 ダ1401m+は半減（SS 3U→1U・h26）。ステークは r3StakeUnits に一本化
         const r3Bets = [];
         let skippedRaces = 0;
         sortedRaces.forEach(r => {
@@ -1284,7 +1343,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 skippedRaces++;
                 return;
             }
-            const units = r.rec === 'SS' ? 3 : 1;
+            const units = r3StakeUnits(R3_STAKE_DEFAULT, r.rec, r.horses);
             const invest = units * 100;
             let payout = 0;
             if (finishOf(pick) === 1) {
@@ -1450,6 +1509,17 @@ document.addEventListener('DOMContentLoaded', () => {
     // 選定は必ず selectWinBets を通すので、壁フィルター・攻撃ソート・Amberの扱いは本番と同一。
     // ROI%だけで優劣を決めないため、全項目で betCount / hits / invest / payout / pnl / maxDD を返す。
     const R3_STAKE_DEFAULT = { SSS: 1, SS: 3, S: 1, Low: 0 }; // 現行(V5' 2026-07-19〜)
+    // h26採用(2026-11-02): ダ1401m+はR3ステークも半減 max(1, floor(U/2))＝SS 3U→1U（SSS/Sの1Uは不変）。重賞側は計測継続中のため対象外。
+    // 撤退判定用に、この日以降のダ1401m+だけ半減しない variant（cond-dirtlong-restore-since）を r3Variants に出す。
+    const isDirtLongRow = h0 => surfaceOfRow(h0) === 'ダ' && distanceOfRow(h0) >= 1401;
+    // R3のステーク: 推奨度連動の基本値にダ1401m+半減をかける。restoreFrom を渡すと、その日付以降のダ1401m+は半減しない
+    function r3StakeUnits(stakeTable, rec, horses, restoreFrom) {
+        const u = stakeTable[rec] || 0;
+        const h0 = horses && horses[0];
+        if (u <= 0 || !isDirtLongRow(h0)) return u;
+        if (restoreFrom && (h0["日付"] || "") >= restoreFrom) return u;
+        return Math.max(1, Math.floor(u / 2));
+    }
 
     function runR3Variant(sortedRaces, opt) {
         const o = opt || {};
@@ -1463,7 +1533,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const bets = [];
         sortedRaces.forEach((r, raceIdx) => {
             const rec = axisClasses ? determineRecommendation(r.horses, axisClasses) : r.rec;
-            let units = stake[rec] || 0;
+            let units = r3StakeUnits(stake, rec, r.horses, o.restoreDirtLongFrom);
             if (stakeFn && units > 0) units = stakeFn(r, rec, units);
             if (units <= 0) return;
             const sel = isBaselineSelection
@@ -1587,18 +1657,19 @@ document.addEventListener('DOMContentLoaded', () => {
             }));
         });
 
-        // 6) レース条件別ステーク（h26）: エンジンの半減ルール(ダ1401m+・重賞 → max(1, floor(U/2)))は
-        //    フル配分のユニットにだけ効いていて、R3の推奨度連動ステーク(SS=3U)には適用されていない。
-        //    選定は変えずステークだけ動かすので deltaSubstitution は常に0（deltaDirect がそのまま効果）。
-        const isDirtLongRace = r => { const h0 = r.horses[0]; return surfaceOfRow(h0) === 'ダ' && distanceOfRow(h0) >= 1401; };
+        // 6) レース条件別ステーク（h26）: 選定は変えずステークだけ動かすので deltaSubstitution は常に0（deltaDirect がそのまま効果）。
+        //    2026-11-02にダ1401m+の半減を採用したので、基準はすでに「ダ1401m+=半減」。dirtlong 側は逆向き（3Uへ戻す）で測る。
+        //    restore-since が撤退判定用（採用後のレースだけ戻す）、restore は採用前を含む参考値。
+        //    cond-half-rule（ダ1401m+または重賞を半減）は基準がダ側を含むようになり cond-grade-half と同一になったので廃止。
         const isGradedRace = r => isGradedRaceRow(r.horses[0]);
         const halfUnits = u => Math.max(1, Math.floor(u / 2));
+        variants.push(evaluate('cond-dirtlong-restore-since', 'R3: 採用日(' + R3_DIRTLONG_HALF_FROM + ')以降のダ1401m+を3Uへ戻す【撤退判定用】',
+            { restoreDirtLongFrom: R3_DIRTLONG_HALF_FROM }));
+        variants.push(evaluate('cond-dirtlong-restore', 'R3: ダ1401m+の半減をやめて3Uへ戻す（全期間・参考）', { restoreDirtLongFrom: '0000' }));
         [
-            { key: 'cond-dirtlong-half', label: 'R3: ダ1401m+のステーク半減(SS 3U→1U)', fn: (r, rec, u) => isDirtLongRace(r) ? halfUnits(u) : u },
-            { key: 'cond-dirtlong-skip', label: 'R3: ダ1401m+をSKIP(0U)', fn: (r, rec, u) => isDirtLongRace(r) ? 0 : u },
+            { key: 'cond-dirtlong-skip', label: 'R3: ダ1401m+をSKIP(半減後の1U→0U)', fn: (r, rec, u) => isDirtLongRow(r.horses[0]) ? 0 : u },
             { key: 'cond-grade-half', label: 'R3: 重賞のステーク半減(SS 3U→1U)', fn: (r, rec, u) => isGradedRace(r) ? halfUnits(u) : u },
-            { key: 'cond-grade-skip', label: 'R3: 重賞をSKIP(0U)', fn: (r, rec, u) => isGradedRace(r) ? 0 : u },
-            { key: 'cond-half-rule', label: 'R3: エンジンの半減ルールをそのまま適用(ダ1401m+または重賞)', fn: (r, rec, u) => (isDirtLongRace(r) || isGradedRace(r)) ? halfUnits(u) : u }
+            { key: 'cond-grade-skip', label: 'R3: 重賞をSKIP(0U)', fn: (r, rec, u) => isGradedRace(r) ? 0 : u }
         ].forEach(v => variants.push(evaluate(v.key, v.label, { stakeFn: v.fn })));
 
         // 7) EV境界スイープ: 各攻撃クラスの下限引上げ／上限引下げを0.1刻みの実在境界で総当たり
@@ -1684,6 +1755,77 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
         return rows;
+    }
+
+    // ===== ワイド参照値（h27・執行しない） ==============================================
+    // simulateRace の refWide を2案ごとに集計する。三連複の refTrio と同じく「買っていたらどうだったか」の紙上成績。
+    // sinceRegistration（WIDE_REF_FROM以降）だけが h27 の判定に使える。all は探索に使った期間を含むので参考値。
+    // withR3 は同じレース群で「R3単勝(実ステーク)だけ」と「R3単勝＋ワイド1点100円」を並べ、損益とDDの変化を見る。
+    function computeWideReference(simulatedRaces) {
+        const sorted = [...simulatedRaces].sort(byRaceDateOrder);
+        const dateOf = r => (r.horses[0] && r.horses[0]["日付"]) || "";
+        const keyed = sorted.filter(r => r.refWide && r.refWide.keyed);
+        const summarize = (list) => {
+            let invest = 0, payout = 0, hits = 0, points = 0, maxPayout = 0;
+            let cum = 0, hwm = 0, maxDD = 0, streak = 0, maxStreak = 0;
+            list.forEach(b => {
+                invest += b.invest; payout += b.payout; points += b.points || 1;
+                if (b.payout > 0) hits++;
+                if (b.payout > maxPayout) maxPayout = b.payout;
+                cum += (b.payout - b.invest) / 100;
+                if (cum > hwm) hwm = cum;
+                if (hwm - cum > maxDD) maxDD = hwm - cum;
+                if (b.payout > 0) streak = 0; else if (++streak > maxStreak) maxStreak = streak;
+            });
+            return {
+                betRaces: list.length, points, hits,
+                hitRate: list.length > 0 ? (hits / list.length) * 100 : 0,
+                invest, payout, pnl: payout - invest,
+                recoveryRate: invest > 0 ? (payout / invest) * 100 : 0,
+                maxPayout, pnlExcludingTop1: payout - maxPayout - invest,
+                maxDrawdownUnits: maxDD, maxLosingStreak: maxStreak
+            };
+        };
+        // R3単勝（runR3Variant の基準と同じ: 単勝1点目・推奨度連動ステーク）
+        const r3BetOf = r => {
+            const units = r3StakeUnits(R3_STAKE_DEFAULT, r.rec, r.horses);
+            const pick = r.finalWinBets && r.finalWinBets[0];
+            if (units <= 0 || !pick) return null;
+            return { invest: units * 100, payout: finishOf(pick) === 1 ? derivePayoutPerUnit(r.horses, pick) * units : 0 };
+        };
+        const planOf = (key, races) => {
+            const wide = races.map(r => r.refWide[key]).filter(Boolean);
+            const r3Only = [], merged = [];
+            races.forEach(r => {
+                const a = r3BetOf(r), w = r.refWide[key];
+                if (a) r3Only.push(a);
+                if (a || w) merged.push({ invest: (a ? a.invest : 0) + (w ? w.invest : 0), payout: (a ? a.payout : 0) + (w ? w.payout : 0) });
+            });
+            const r3 = summarize(r3Only), mix = summarize(merged);
+            return {
+                wide: summarize(wide),
+                withR3: {
+                    r3OnlyPnl: r3.pnl, r3OnlyMaxDrawdownUnits: r3.maxDrawdownUnits,
+                    combinedPnl: mix.pnl, combinedMaxDrawdownUnits: mix.maxDrawdownUnits,
+                    deltaPnl: mix.pnl - r3.pnl, deltaMaxDrawdownUnits: mix.maxDrawdownUnits - r3.maxDrawdownUnits
+                }
+            };
+        };
+        const since = keyed.filter(r => dateOf(r) >= WIDE_REF_FROM);
+        const PLANS = [
+            { key: 'pickAxis', label: '単勝1点目×軸（1点）' },
+            { key: 'axisMates', label: '軸→三連複の相手（最大3点・旧ワイド型）' }
+        ];
+        return {
+            note: 'ワイドは執行していない紙上成績（h27）。判定は sinceRegistration のみ。all は探索期間（〜2026-10-18）を含む参考値',
+            registeredFrom: WIDE_REF_FROM,
+            keyedRaces: keyed.length,
+            plans: PLANS.map(p => ({
+                key: p.key, label: p.label,
+                all: planOf(p.key, keyed),
+                sinceRegistration: planOf(p.key, since)
+            }))
+        };
     }
 
     function wilsonCI(k, n) {
@@ -3042,7 +3184,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 </table>
             </div>
             <p class="text-xs text-slate-500 mt-2">
-                ※R3＝各レースの単勝優先最上位1点を購入（残高2万円未満時の採用ルール・2026-07-09）。ステークは推奨度連動(SS=3U・SSS/S=1U、2026-07-19〜)。資金残高の推移は考慮しないフラット計測。
+                ※R3＝各レースの単勝優先最上位1点を購入（残高2万円未満時の採用ルール・2026-07-09）。ステークは推奨度連動(SS=3U・SSS/S=1U、2026-07-19〜。ダ1401m+は半減でSSも1U、2026-11-02〜)。資金残高の推移は考慮しないフラット計測。
                 買い目なし（ノーベット）: 現行フル ${full.skippedRaces ?? 0}レース / R3 ${sim.skippedRaces ?? 0}レース。${liveSim ? ` 実運用のみ: 現行フル ${(liveSim.fullAllocation || {}).skippedRaces ?? 0}レース / R3 ${liveSim.skippedRaces ?? 0}レース` : ''}
             </p>
             ${renderR3ClassBreakdown(liveSim || sim, !!liveSim)}
@@ -3203,6 +3345,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 })),
                 smallBankSimulation: smallBank,
                 trifectaAxisPerformance: computeTrifectaAxisPerformance(sim),
+                wideReference: computeWideReference(sim),
                 r3Variants: computeR3Variants(sim)
             };
         } catch (e) {
@@ -3450,6 +3593,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     "smallBankSimulation.concentration": "R3の払戻集中度。pnlExcludingTop1/Top3 がマイナスなら単発高配当依存と判断する",
                     "smallBankSimulation.hitOddsDistribution / topPayouts": "R3的中馬のオッズ帯分布と払戻上位5本。回収率が単発依存かの確認に使う",
                     "smallBankSimulation.fullAllocation.classBreakdown": "フル配分で実際に購入した馬のクラス別成績（1点目に限らない）。R3の話には混ぜないこと",
+                    "wideReference": "ワイドの紙上成績（執行していない・h27）。pickAxis=単勝1点目×軸の1点、axisMates=軸→三連複の相手へ最大3点（旧ワイド型）。all=2026-06-06以降（探索期間を含む参考値）、sinceRegistration=2026-10-19以降（h27の判定はこちらだけ）。withR3=R3単勝だけの場合との損益差・最大DD差。allを根拠にした採用提案は禁止。購入時のワイドオッズは未記録のためEVは計算できない",
                     "trifectaAxisPerformance": "三連複の【軸馬クラス別】成績。executed=現行ルール(SSのみ執行＋軸B0+はSKIP)で実際に買った分、reference=SKIPを無視して全部買った場合、axisRuleSkipped/axisRuleSkippedSinceChange=軸クラスSKIPだけで止めた分の仮想成績(全期間/2026-10-10以降。h25の撤退判定はSinceChangeのみ)、pnlExcludingTop1=最大払戻1本を除いた損益、axisCls=ALLはアーム全体。防御系クラスの取捨（例: B0を軸から外すか）はclassPerformanceの複勝率ではなくこの表で判定する",
                     "r3Variants": "★R3反実仮想シミュレーション。同一レース群で設定だけ差し替えた結果。variants=順位入替/クラスN降格/軸構成変更/ステーク配分/壁フィルター拡張/レース条件別ステーク(cond-*: ダ1401m+・重賞の半減/SKIP、h26用・deltaSubstitutionは常に0)、evCutSweep=クラス別EV境界の総当たり。baselineとの差分は deltaPnl / deltaMaxDrawdownUnits。affectedBets は基準から変化したベット数。classMix は変更後に何のクラスが繰り上がったかを示す。※スイープは多重比較なので、良く見えた1点を根拠に採用しないこと",
                     "liveOnlyView.summary.overallWinRecoveryRate": "★フル配分ベースの単勝回収率。現行運用(R3)の回収率ではないので『現行の回収率』として引用しないこと",
@@ -3528,6 +3672,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 // --- 小資金モード(R3)シミュレーション: 現行フル配分との比較（2026-07-09導入） ---
                 smallBankSimulation: smallBankSim || null,
                 trifectaAxisPerformance: computeTrifectaAxisPerformance(simulatedRaces),
+                wideReference: computeWideReference(simulatedRaces),
                 // liveOnlyView 側に実運用ベースの反実仮想が入るため、重複を避けて期間フィルタが実運用のみの時だけ出す
                 r3Variants: (filterPeriod && filterPeriod.value === 'live') ? computeR3Variants(simulatedRaces) : null,
                 // --- 実運用のみビュー: viewFilterに関係なく常時併記（意思決定の正）。フィルタが実運用のみの時は本体と同一のためnull ---
@@ -4646,6 +4791,24 @@ R3全体: ${r3.betCount}点 / 的中${r3.hits ?? '-'}件 (${r3.hitRate.toFixed(2
                     trioAxis.forEach(a => {
                         md += `| ${a.axisCls} | ${a.executed.betRaces} | ${a.executed.hits} | ${a.executed.recoveryRate.toFixed(1)}% | ${Math.round(a.executed.pnl).toLocaleString()}円 | ${Math.round(a.executed.pnlExcludingTop1).toLocaleString()}円 | ${a.reference.betRaces} | ${a.reference.hits} | ${a.reference.recoveryRate.toFixed(1)}% | ${fmtSkip(a.axisRuleSkipped)} | ${fmtSkip(a.axisRuleSkippedSinceChange)} |
 `;
+                    });
+                    md += `
+`;
+                }
+                // 7. ワイド参照値（h27・紙上追跡）
+                const wideRef = computeWideReference(liveSimRaces);
+                if (wideRef.keyedRaces > 0) {
+                    md += `## 7. ワイド参照値（実運用レースのみ・執行していない紙上成績／h27）
+※ワイドは買っていない。判定は登録後（${wideRef.registeredFrom}以降）の列だけを使う。全期間列は探索に使った期間（〜2026-10-18）を含むので、これを根拠に採用を提案してはならない。R3併用の差 = 「R3単勝＋ワイド」と「R3単勝だけ」の損益差・最大DD差。
+| 案 | 期間 | レース/点数 | 的中 | 投資 | 払戻 | 回収率 | 損益 | 最大1本除く損益 | 最大DD | R3併用の損益差 | R3併用のDD差 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+`;
+                    wideRef.plans.forEach(p => {
+                        [['全期間(参考)', p.all], ['登録後', p.sinceRegistration]].forEach(([label, s]) => {
+                            const w = s.wide;
+                            md += `| ${p.label} | ${label} | ${w.betRaces}R/${w.points}点 | ${w.hits} | ${Math.round(w.invest).toLocaleString()}円 | ${Math.round(w.payout).toLocaleString()}円 | ${w.recoveryRate.toFixed(1)}% | ${Math.round(w.pnl).toLocaleString()}円 | ${Math.round(w.pnlExcludingTop1).toLocaleString()}円 | ${w.maxDrawdownUnits.toFixed(1)}U | ${Math.round(s.withR3.deltaPnl).toLocaleString()}円 | ${s.withR3.deltaMaxDrawdownUnits >= 0 ? '+' : ''}${s.withR3.deltaMaxDrawdownUnits.toFixed(1)}U |
+`;
+                        });
                     });
                     md += `
 `;
