@@ -42,8 +42,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // ss-engine-v2 CSVエクスポートで末尾に追加された新規列（後方互換: 無ければ "-" 扱い）
     const NEW_OPTIONAL_COLUMNS = [
-        "発走時刻", "オッズ最終更新時刻", "天候", "馬場状態", "走破タイム", "着差", "上がり3F", "通過順", "ロジックVer"
+        "発走時刻", "オッズ最終更新時刻", "天候", "馬場状態", "走破タイム", "着差", "上がり3F", "通過順", "ロジックVer",
+        "タイプ" // 2026-11-06 h29: 勝=勝ち切り型／堅=堅実型(2〜3着型)／穴=一発型／-=未記入（記録のみ・計算には使わない）
     ];
+    const HORSE_TYPE_TAGS = ['勝', '堅', '穴'];
     // 「統合」CSVエクスポート用ヘッダー（既存列+新規列。既存列の並び・内容は変更しない）
     const EXPECTED_HEADERS_WITH_NEW = EXPECTED_HEADERS.concat(NEW_OPTIONAL_COLUMNS);
 
@@ -66,11 +68,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const R3_DIRTLONG_HALF_FROM = '2026-11-02';
 
     // ロジック仕様サマリー。エンジンのロジック変更時は本文と SPEC_UPDATED を必ずセットで更新すること
-    const SPEC_UPDATED = "2026-11-02";
+    const SPEC_UPDATED = "2026-11-06";
     const SPEC_BLOCK = `
 ---
 ### ◤ SS-Engine 現行仕様（前提）◢
 - スコア: S=100, A=65, B=40, C=20, D=10, E=3, F=0.5
+- タイプタグ（2026-11-06〜・記録のみ）: 評価と一緒に手で付ける CSV「タイプ」列（勝=勝ち切り型／堅=堅実型・2〜3着型／穴=一発型／-=未記入）。勝率・クラス・ステークには使っていない。h29の判定前にタグを使う提案はしないこと
 - 予想勝率 = 自スコア ÷ 出走全馬スコア合計（オッズ>0の馬のみ）
 - 期待値EV = 予想勝率 × 単勝オッズ（小数第3位以下を切り捨て）
 - クラス分類（評価ランク × EV帯）:
@@ -378,6 +381,18 @@ document.addEventListener('DOMContentLoaded', () => {
             // h26の出口として2026-11-02にR3のダ1401m+を半減。採用前のサンプル（半減が有利に出た期間）を含む累計では戻す判断をしない。
             condition: 'liveOnlyView.r3Variants の cond-dirtlong-restore-since（2026-11-02以降のダ1401m+だけ3Uへ戻した場合）で判定する。affectedBets≧60 かつ deltaDirect>0（＝採用後のダ1401m+のSSで、3Uのほうが損益が良かった）なら3Uへ戻す。cond-dirtlong-restore（採用前を含む全期間）は参考値で、判定には使わない。採用前の実績: 対象69点/投資20,700円/払戻17,490円/84.5%。現ペース約3ベット/週・到達目安2027-03以降。前倒しでの撤退・skipへの深掘りは不可（skip化はh28が決着してから別途審議）',
             compute: null // 手動判定（liveOnlyView.r3Variants.variants の cond-dirtlong-restore-since を参照）
+        },
+        {
+            id: 'h29', name: 'タイプタグ（勝ち切り/堅実/一発）の情報量', registeredOn: '2026-11-06', dataFrom: '2026-11-06', direction: '観察',
+            // 評価(S〜F)は1本の勝率に変換しているため「勝ちきれないが2・3着に来る馬」と「運が良ければ来る馬」を区別できない。
+            // ユーザーが評価と同時に手で付けるタグ（CSV「タイプ」列）を記録し、評価だけでは分からない着順の形を持っているかを検証する。
+            condition: 'CSV「タイプ」列（勝=勝ち切り型／堅=堅実型・2〜3着型／穴=一発型／-=未記入＝普通）。判定開始: タグ付きの馬が300頭以上かつ各タイプ50頭以上。【確認1】同じ評価の中で、堅は未記入より「3着内率÷勝率」が高く、穴は低いか（タグが着順の形を分けているか）。【確認2・合格条件】評価×タグで補正した3着内確率のログロスが、現行の評価だけの場合と市場（単勝オッズ由来）の両方を上回ること。合格なら案B（強さ×ばらつきのシミュレーションで勝率と3着内率を出す）と案C（購入時の複勝オッズの記録）へ進む。不合格ならタグの記録をやめる。判定前に勝率計算・クラス・ステークへタグを使ってはならない。current の n はタグ付きの馬の頭数（実運用に限らない全馬・hits は1着数）',
+            compute: rows => {
+                const tagged = rows.filter(r => HORSE_TYPE_TAGS.includes(r["タイプ"]));
+                const st = hypoStat(tagged);
+                st.note = HORSE_TYPE_TAGS.map(t => `${t}${tagged.filter(r => r["タイプ"] === t).length}`).join('/');
+                return st;
+            }
         }
     ];
 
