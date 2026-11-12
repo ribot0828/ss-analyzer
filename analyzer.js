@@ -120,7 +120,7 @@ document.addEventListener('DOMContentLoaded', () => {
 - liveOnlyView.smallBankSimulation.monthly … ★R3の月別成績を「遡及あり／なし」で並べたもの（h31）。retroR3=現行ルールを全期間に遡って当てたR3（本体と同じ反実仮想）、retroR3Flat1U=同じ馬を1U均等、asFlaggedTop1Flat1U=CSVに記録された【当時の判定】（当時の購入時クラス・実行フラグ○）の攻撃系から現行の優先順位で1点目を1U均等、asFlaggedAllFlat1U=当時○の攻撃系を全頭1U均等。R3の累計回収率は、ルールを決めたのと同じデータに後からルールを当てた値なので上振れを含む。「現行の実力」を語るときは asFlagged* と retroR3Flat1U の差を必ず併記すること。
 - liveOnlyView.trifectaAxisPerformance … 三連複の軸クラス別成績。executed=現行ルール(SSのみ執行＋軸B0+はSKIP)の実績、reference=全部買った場合、axisRuleSkipped / axisRuleSkippedSinceChange=軸クラスSKIPだけで止めた分の仮想成績（全期間／2026-10-10以降）。maxPayout・pnlExcludingTop1=最大払戻1本と、それを除いた損益（マイナスなら単発依存）。axisCls="ALL"の行が三連複アーム全体。防御系クラスの取捨はここで判定する。★B0+の executed は2026-10-10以降の再計算では全期間0になる（ルールを過去にも適用して再シミュレーションするため）。B0+の実績を見るときは axisRuleSkipped を使うこと。
 - liveOnlyView.wideReference … ワイドの紙上成績（★ワイドは執行していない。h27）。plans=2案（pickAxis=単勝1点目×三連複の軸の1点／axisMates=軸→三連複の相手へ最大3点＝v5.29で止めた旧ワイド型）。各案に all（馬番付き払戻がある2026-06-06以降の全部＝探索期間を含む参考値）と sinceRegistration（2026-10-19以降＝h27の判定用）。wide=ワイド単体（betRaces/points/hits/invest/payout/pnl/recoveryRate/pnlExcludingTop1/maxDrawdownUnits）、withR3=同じレース群でR3単勝だけの場合との差（deltaPnl・deltaMaxDrawdownUnits）。対象は軸がいるレース（三連複の密度条件を満たす）かつ推奨度Low以外。★all の値を根拠にワイド採用を提案してはならない。購入時のワイドオッズは記録していないので、ワイドのEVは計算できない。
-- liveOnlyView.r3Variants … ★R3反実仮想シミュレーション（variants / evCutSweep）。提案する変更が既にここで計測されている場合は、その deltaPnl・deltaMaxDrawdownUnits を必ず引用すること。数値を自分で推測しない。affectedBets=基準から変化したベット数（馬の入替・消滅・ステーク増減）で、差分の母数として併記する。cond-*（ダ1401m+・重賞のステーク条件）は h26/h28 の判定専用で、選定を変えないため deltaSubstitution は常に0。基準はすでに「ダ1401m+=半減」なので、cond-dirtlong-restore-since（採用日2026-11-02以降のダ1401m+を3Uへ戻した場合＝h28の撤退判定用）／cond-dirtlong-restore（全期間で戻した参考値）は逆向きの差分。cond-grade-half/skip は重賞側（h26継続）。density-noD / density-D1pass はSS密度の分子の定義を変えた場合（h30）で、推奨度＝ステークだけが動く（deltaSubstitutionは常に0）。recShift=推奨度が動いたレース数。★三連複への波及は含まない。
+- liveOnlyView.r3Variants … ★R3反実仮想シミュレーション（variants / evCutSweep）。提案する変更が既にここで計測されている場合は、その deltaPnl・deltaMaxDrawdownUnits を必ず引用すること。数値を自分で推測しない。affectedBets=基準から変化したベット数（馬の入替・消滅・ステーク増減）で、差分の母数として併記する。cond-*（ダ1401m+・重賞のステーク条件）は h26/h28 の判定専用で、選定を変えないため deltaSubstitution は常に0。基準はすでに「ダ1401m+=半減」なので、cond-dirtlong-restore-since（採用日2026-11-02以降のダ1401m+を3Uへ戻した場合＝h28の撤退判定用）／cond-dirtlong-restore（全期間で戻した参考値）は逆向きの差分。cond-grade-half/skip は重賞側（h26継続）。density-*はSS密度の定義を変えた場合（h30）で、推奨度＝ステークだけが動き馬の選定は変わらない（ただし Low→S/SS で新たに買うベットは deltaSubstitution 側に計上される。同じ馬なので実質は直接効果）。recShift=推奨度が動いたレース数。主候補は density-sep-q（Dを分子から外し推奨度しきい値を0.125/0.0625へ）、noD/D1pass/sep-167は比較用。trifecta=その推奨度で三連複を執行した場合の成績・差。★h30の判定は sinceRegistration（2026-11-12以降のレースだけ）の deltaDirect / affectedBets / trifectaDeltaPnl だけを使う。全期間の deltaPnl は登録前に見た値なので根拠にしない。
 - 決着済みでクローズした仮説（h7ドリフトガード／h10 S三連複再開／h18 B1降格）は、hypothesisRegistry に数値が出力され続けても、同じ数値を根拠に同じ変更を再提案しないこと。
 - liveOnlyView.recommendationPerformance … 推奨度別。sampleRaces はレース数、winHitRate の分母は単勝を買ったレース数（別物なので混同しない）。三連複は現行SSのみ執行のため SSS/S/Low の trifecta* は常に0（trifectaSkipped=true）＝「買って外した」ではない。仮に買った場合の成績は refTrifectaRecoveryRate / refTrifectaHits / refTrifectaBetRaces を見る。
 - トップレベルの同名フィールド(summary / classPerformance / smallBankSimulation …)は全期間値。参考のみ。全期間値だけを根拠にした増額・緩和系の提案は禁止。
@@ -400,7 +400,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // 2026-11-08のGemini総合評価で指摘。Dランクは予想勝率が実勢の約1.7倍に過大（rankCalibration.D.ratio 0.58）、D1もEV1.300〜1.699は
             // MAO(1.70/勝率)で買えないのに、SS密度の分子（EV≧1.300×S/A/B/D）には数えられ、推奨度SS(R3 3U)を押し上げている疑い。
             // 2026-11-08時点のCSV簡易集計では、分子からDを外すと実運用592レース中379レース(64%)で推奨度が変わる＝定義整理ではなく推奨度の作り直しの規模。
-            condition: 'r3Variants の density-noD（分子をS/A/Bのみ）で判定する。density-D1pass（DはAmber通過のD1だけ数える）は比較用。選定は変わらずステークだけ動くので deltaDirect がそのまま効果。採用条件（全て必須）: ①affectedBets≧60 ②deltaDirect>0 が【登録日(2026-11-11)以降の2サイクル連続】かつ2サイクル目は前サイクルからの増分でも deltaDirect>0 ③deltaMaxDrawdownUnits≦0 ④三連複（SSのみ執行・密度下限0.10/0.15）への波及を別途計測し、三連複アーム(axisCls=ALL executed)の損益が悪化しないこと（この variant は単勝R3しか見ていないため、④が未計測のうちは採用不可）。recShift で推奨度がどこからどこへ動いたかを必ず併記する。全期間の累計値は登録前に一度見ているので、判定は登録後の増分を主に使う。前倒し実施不可',
+            condition: '【2026-11-12改訂】主候補は r3Variants の density-sep-q（Dを分子から外し、しきい値を 0.125/0.0625 へ。しきい値は損益を見ずに「SS以上・S・Lowの件数が現行と同じになる」分位点で決めた＝ルールにすると概ね「EV≧1.3のS/A/B馬が2頭以上でSS候補・1頭でS」）。density-sep-167（0.167/0.083）・density-noD・density-D1pass は比較用。経緯: 2026-11-11 density-noD は deltaPnl −31,230円で不採用水準。2026-11-12のテストで「Dを弱めるだけ」の案（重み0.75〜0・DのEVしきい値1.5〜3.0・D頭数上限・較正比補正）は全期間で劣後し、単調性も無かった。Dを外してしきい値を下げ直す系統だけが凍結後(07-19〜)で3設定とも現行を上回った（R3 +7,360/+13,050/+12,020円・三連複も改善）が、凍結前は3設定とも劣後（−28,190/−6,680/−2,920円）＝期間で符号が反転するため、登録前のデータでは採否を決めない。判定は各variantの sinceRegistration（2026-11-12以降のレースだけ）で行う。採用条件（全て必須）: ①sinceRegistration.affectedBets≧60 ②sinceRegistration.deltaDirect>0 が2サイクル連続（2サイクル目は前サイクルからの増分でも>0）③R3の最大DDが悪化しない（sep-q は登録前の凍結後で+9Uだったので要注意。sinceRegistration期間のDDを別途確認）④sinceRegistration.trifectaDeltaPnl≧0（三連複アームが悪化しない）。recShift を必ず併記する。三連複の計測は元の密度が下限未満で買い目が無いレースを数えられない（過小評価）点を注記する。採用時は推奨度の定義変更＝SS密度・推奨度・R3ステーク・三連複執行の全系統に効くため、SPEC_BLOCK・エンジン(logic.js)・仕様書を同時に更新する。前倒し実施不可',
             compute: null // 手動判定（liveOnlyView.r3Variants.variants の density-* を参照）
         },
         {
@@ -1002,16 +1002,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // axisClasses を差し替えると「防御系の構成を変えたら推奨度がどう動くか」を計測できる（既定は現行仕様）
     // densityCountFn を差し替えると「SS密度の分子の定義を変えたら推奨度がどう動くか」を計測できる（既定は現行仕様）
-    function determineRecommendation(raceHorses, axisClasses, densityCountFn) {
+    // thresholds={ss, s} を差し替えると推奨度のしきい値を変えられる（既定は現行 0.250 / 0.150。h30 の density-sep-* 用）
+    const REC_THRESHOLDS_DEFAULT = { ss: 0.250, s: 0.150 };
+    function determineRecommendation(raceHorses, axisClasses, densityCountFn, thresholds) {
         const axis = axisClasses || AXIS_CLASSES;
+        const th = thresholds || REC_THRESHOLDS_DEFAULT;
         const density = calculateSSDensity(raceHorses, densityCountFn);
         const classes = raceHorses.map(h => clsOf(h));
         const hasS0orS1 = classes.some(c => c === 'S0' || c === 'S1');
         const hasAxis = classes.some(c => axis.includes(c));
 
-        if (density >= 0.250 && hasS0orS1) return 'SSS';
-        if (density >= 0.250 && hasAxis) return 'SS';
-        if (density >= 0.150) return 'S';
+        if (density >= th.ss - 1e-9 && hasS0orS1) return 'SSS';
+        if (density >= th.ss - 1e-9 && hasAxis) return 'SS';
+        if (density >= th.s - 1e-9) return 'S';
         return 'Low';
     }
 
@@ -1626,7 +1629,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const isBaselineSelection = !o.priority && !exclude;
         const bets = [];
         sortedRaces.forEach((r, raceIdx) => {
-            const rec = (axisClasses || o.densityCount) ? determineRecommendation(r.horses, axisClasses, o.densityCount) : r.rec;
+            const rec = (axisClasses || o.densityCount || o.densityThresholds) ? determineRecommendation(r.horses, axisClasses, o.densityCount, o.densityThresholds) : r.rec;
             let units = r3StakeUnits(stake, rec, r.horses, o.restoreDirtLongFrom);
             if (stakeFn && units > 0) units = stakeFn(r, rec, units);
             if (units <= 0) return;
@@ -1768,24 +1771,78 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // 6b) SS密度の分子の定義（h30・2026-11-11追加）。Dランクは予想勝率が実勢の約1.7倍に過大（rankCalibration.D.ratio≒0.58）で、
         //     D1もMAO=1.70/勝率のためEV1.300〜1.699は買えないが、SS密度の分子（EV≧1.300×評価S/A/B/D）には数えられている。
-        //     分子を変えると推奨度(SSS/SS/S/Low)＝R3ステークだけが動き、選定は変わらない（deltaSubstitution は常に0）。
-        //     ★三連複（SSのみ執行・密度下限）への波及はこの variant では計測していない。recShift=推奨度が動いたレース数（基準→変更後）
-        const recShiftOf = (countFn) => {
+        //     分子を変えると推奨度(SSS/SS/S/Low)＝R3ステークだけが動き、選定は変わらない。
+        //     ただし Low→S/SS で新たに現れるベットは decompose 上 deltaSubstitution に入る（同じ馬なので実質は直接効果）。
+        //     recShift=推奨度が動いたレース数（基準→変更後）。
+        //     2026-11-12追加: density-sep-*（Dを外したうえで推奨度のしきい値を下げ直す）。2026-11-12のテストで「Dを弱めるだけ」の案
+        //     （重み・EVしきい値・頭数上限・較正比）は全期間で現行に劣後し、Dを外してしきい値を下げ直す系統だけが凍結後(07-19〜)で
+        //     3設定とも現行を上回った（凍結前は3設定とも劣後＝現行しきい値が凍結前データで決まった有利を含む）。判定は登録日以降のみ。
+        //       sep-q   : しきい値 0.125/0.0625 は損益を見ずに「SS以上・S・Lowの件数が現行と同じになる」分位点で決めた値（主候補）
+        //       sep-167 : 0.167/0.083（=2/12・1/12）の丸め値（比較用）
+        //     trifecta=この推奨度で三連複を執行した場合（SSのみ・軸SKIP・密度下限は S しきい値の比率で縮尺）。
+        //       ※元の密度が下限未満で買い目が作られていないレース（Low→SS 等）は三連複を数えられない＝過小評価になる。
+        //     sinceRegistration=登録日(DENSITY_SEP_FROM)以降のレースだけの直接効果・三連複の差（h30の判定はこちらを使う）
+        const DENSITY_SEP_FROM = '2026-11-12';
+        const raceDateOf = r => ((r.horses[0] && r.horses[0]["日付"]) || "").trim();
+        const recShiftOf = (countFn, th) => {
             const m = {};
             sortedRaces.forEach(r => {
-                const nr = determineRecommendation(r.horses, null, countFn);
+                const nr = determineRecommendation(r.horses, null, countFn, th);
                 if (nr !== r.rec) { const k = r.rec + '→' + nr; m[k] = (m[k] || 0) + 1; }
             });
             return m;
         };
+        const trioUnder = (countFn, th, fromDate) => {
+            const scale = th ? th.s / REC_THRESHOLDS_DEFAULT.s : 1;
+            const list = [];
+            sortedRaces.forEach(r => {
+                if (fromDate && raceDateOf(r) < fromDate) return;
+                if (!(r.refTrioInvest > 0)) return;
+                const rec = (countFn || th) ? determineRecommendation(r.horses, null, countFn, th) : r.rec;
+                if (rec !== 'SS') return;
+                const minD = (isGradedRaceRow(r.horses[0]) ? 0.100 : 0.150) * scale;
+                if (calculateSSDensity(r.horses, countFn) < minD - 1e-9) return;
+                if (r.axisHorse && TRIO_SKIP_AXIS_CLASSES.includes(clsOf(r.axisHorse))) return;
+                list.push({ invest: r.refTrioInvest, payout: r.refTrioReturn });
+            });
+            const invest = list.reduce((a, b) => a + b.invest, 0), payout = list.reduce((a, b) => a + b.payout, 0);
+            return { betRaces: list.length, hits: list.filter(b => b.payout > 0).length, invest, payout, pnl: payout - invest,
+                     recoveryRate: invest > 0 ? (payout / invest) * 100 : 0 };
+        };
+        const trioBase = trioUnder(null, null, null), trioBaseSince = trioUnder(null, null, DENSITY_SEP_FROM);
+        // 登録日以降の直接効果（選定は変わらないので、同じレースの「変更後−基準」の損益差の合計）
+        const directSince = (bets) => {
+            const v = new Map(bets.map(b => [b.raceIdx, b]));
+            let delta = 0, affected = 0;
+            sortedRaces.forEach((r, i) => {
+                if (raceDateOf(r) < DENSITY_SEP_FROM) return;
+                const b = baseByRace.get(i), x = v.get(i);
+                if ((b ? b.invest : 0) === (x ? x.invest : 0)) return;
+                affected++;
+                delta += pnlOfBet(x) - pnlOfBet(b);
+            });
+            return { affectedBets: affected, deltaDirect: delta };
+        };
+        const SAB = ['S', 'A', 'B'];
         [
-            { key: 'density-noD', label: 'SS密度の分子からDランクを除外（S/A/Bのみ）【h30】',
-              fn: h => ['S', 'A', 'B'].includes(ratingOf(h)) },
-            { key: 'density-D1pass', label: 'SS密度の分子のDランクをAmber通過のD1だけに限定【h30・参考】',
-              fn: h => ['S', 'A', 'B'].includes(ratingOf(h)) || (ratingOf(h) === 'D' && clsOf(h) === 'D1' && !!h.amberPass) }
+            { key: 'density-noD', label: 'SS密度の分子からDランクを除外（S/A/Bのみ）【h30・比較用】',
+              fn: h => SAB.includes(ratingOf(h)) },
+            { key: 'density-D1pass', label: 'SS密度の分子のDランクをAmber通過のD1だけに限定【h30・比較用】',
+              fn: h => SAB.includes(ratingOf(h)) || (ratingOf(h) === 'D' && clsOf(h) === 'D1' && !!h.amberPass) },
+            { key: 'density-sep-q', label: 'Dを分子から外し、しきい値を件数合わせの0.125/0.0625へ【h30・主候補】',
+              fn: h => SAB.includes(ratingOf(h)), th: { ss: 0.125, s: 0.0625 } },
+            { key: 'density-sep-167', label: 'Dを分子から外し、しきい値を0.167/0.083へ【h30・比較用】',
+              fn: h => SAB.includes(ratingOf(h)), th: { ss: 2 / 12, s: 1 / 12 } }
         ].forEach(v => {
-            const res = evaluate(v.key, v.label, { densityCount: v.fn });
-            res.recShift = recShiftOf(v.fn);
+            const opt = { densityCount: v.fn };
+            if (v.th) opt.densityThresholds = v.th;
+            const res = evaluate(v.key, v.label, opt);
+            res.recShift = recShiftOf(v.fn, v.th);
+            const tAll = trioUnder(v.fn, v.th, null), tSince = trioUnder(v.fn, v.th, DENSITY_SEP_FROM);
+            res.trifecta = Object.assign({}, tAll, { deltaPnl: tAll.pnl - trioBase.pnl });
+            const ds = directSince(runR3Variant(sortedRaces, opt));
+            res.sinceRegistration = Object.assign({ from: DENSITY_SEP_FROM }, ds,
+                { trifectaBetRaces: tSince.betRaces, trifectaDeltaPnl: tSince.pnl - trioBaseSince.pnl });
             variants.push(res);
         });
 
@@ -3713,7 +3770,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     "smallBankSimulation.fullAllocation.classBreakdown": "フル配分で実際に購入した馬のクラス別成績（1点目に限らない）。R3の話には混ぜないこと",
                     "wideReference": "ワイドの紙上成績（執行していない・h27）。pickAxis=単勝1点目×軸の1点、axisMates=軸→三連複の相手へ最大3点（旧ワイド型）。all=2026-06-06以降（探索期間を含む参考値）、sinceRegistration=2026-10-19以降（h27の判定はこちらだけ）。withR3=R3単勝だけの場合との損益差・最大DD差。allを根拠にした採用提案は禁止。購入時のワイドオッズは未記録のためEVは計算できない",
                     "trifectaAxisPerformance": "三連複の【軸馬クラス別】成績。executed=現行ルール(SSのみ執行＋軸B0+はSKIP)で実際に買った分、reference=SKIPを無視して全部買った場合、axisRuleSkipped/axisRuleSkippedSinceChange=軸クラスSKIPだけで止めた分の仮想成績(全期間/2026-10-10以降。h25の撤退判定はSinceChangeのみ)、pnlExcludingTop1=最大払戻1本を除いた損益、axisCls=ALLはアーム全体。防御系クラスの取捨（例: B0を軸から外すか）はclassPerformanceの複勝率ではなくこの表で判定する",
-                    "r3Variants": "★R3反実仮想シミュレーション。同一レース群で設定だけ差し替えた結果。variants=順位入替/クラスN降格/軸構成変更/ステーク配分/壁フィルター拡張/レース条件別ステーク(cond-*: ダ1401m+・重賞の半減/SKIP、h26用・deltaSubstitutionは常に0)、evCutSweep=クラス別EV境界の総当たり。baselineとの差分は deltaPnl / deltaMaxDrawdownUnits。affectedBets は基準から変化したベット数。classMix は変更後に何のクラスが繰り上がったかを示す。density-noD / density-D1pass=SS密度の分子の定義変更（h30・ステークだけが動く・recShift=推奨度が動いたレース数・三連複への波及は含まない）。※スイープは多重比較なので、良く見えた1点を根拠に採用しないこと",
+                    "r3Variants": "★R3反実仮想シミュレーション。同一レース群で設定だけ差し替えた結果。variants=順位入替/クラスN降格/軸構成変更/ステーク配分/壁フィルター拡張/レース条件別ステーク(cond-*: ダ1401m+・重賞の半減/SKIP、h26用・deltaSubstitutionは常に0)、evCutSweep=クラス別EV境界の総当たり。baselineとの差分は deltaPnl / deltaMaxDrawdownUnits。affectedBets は基準から変化したベット数。classMix は変更後に何のクラスが繰り上がったかを示す。density-*=SS密度の定義変更（h30・選定は変わらずステークだけが動く。Low→S/SSで新たに買うベットは deltaSubstitution 側に入る・recShift=推奨度が動いたレース数）。主候補 density-sep-q=Dを分子から外し推奨度しきい値を0.125/0.0625へ。trifecta=その推奨度で三連複を執行した場合の成績と差、sinceRegistration=2026-11-12以降だけの直接効果・三連複の差（h30の判定はこちらだけ）。※スイープは多重比較なので、良く見えた1点を根拠に採用しないこと",
                     "liveOnlyView.summary.overallWinRecoveryRate": "★フル配分ベースの単勝回収率。現行運用(R3)の回収率ではないので『現行の回収率』として引用しないこと",
                     "classPerformance / liveOnlyView.classPerformance": "購入時クラスに分類された【全馬】。壁フィルタ・単勝優先順位・R3の1点縛りは未反映。D1/XのAmber不通過は 'D1(NG)' 等に分離",
                     "evaluationPerformance": "【評価ランク(S〜F)×EV帯】の全馬集計。クラス(A2/B2…)別ではない。クラス境界の検討には classPerformance[].evDetails を使うこと",
