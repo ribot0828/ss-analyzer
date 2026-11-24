@@ -472,16 +472,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function handleFiles(files) {
         showToast("読み込み中...");
+        let skipped = 0;
         for (const file of files) {
-            if (file.name.endsWith('.csv')) {
+            if (file.name.toLowerCase().endsWith('.csv')) {
                 const results = await parseCSV(file);
                 processRows(results.data);
                 addFileBadge(file.name, results.data.length);
+            } else {
+                skipped++;
             }
         }
         populateFilters();
         updateControlPanel();
-        showToast("ロード完了");
+        showToast(skipped > 0 ? `ロード完了（CSV以外の${skipped}件はスキップ）` : "ロード完了");
     }
 
     function parseCSV(file) {
